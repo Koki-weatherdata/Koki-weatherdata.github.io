@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>アメダス気温観測マップ</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <!-- Leaflet CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <style>
+    /* 地図表示領域 */
+    #map {
+      width: 100%;
+      height: 100vh;
+    }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  
+  <!-- Leaflet JS -->
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  
+  <script>
+    // 地図の初期化（日本付近）
+    const map = L.map('map').setView([35.6895, 139.6917], 5);
+
+    // 地理院タイルの設定
+    L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png', {
+      attribution: "<a href='https://maps.gsi.go.jp/development/ichiran.html' target='_blank'>地理院タイル</a>"
+    }).addTo(map);
+
+    // 現在表示中のポップアップを保持するグローバル変数
+    let currentPopup = null;
+
+    // 観測地点一覧の取得
+    fetch("https://www.jma.go.jp/bosai/amedas/const/amedastable.json")
+      .then(response => response.json())
+      .then(data => {
+        // data は各観測所番号（例："11001"）をキーとしたオブジェクト
+        for (const stnid in data) {
+          const station = data[stnid];
+
+          // station が null または undefined ならスキップ
+          if (!station) {
+            console.warn(`Station ${stnid} is null or undefined. Skipping.`);
+            continue;
+          }
+          // elems の先頭が '0' なら気温データがないのでスキップ
+          if (!station.elems || station.elems.charAt(0) === '0') continue;
+          // 座標データのチェック（lat, lon が存在し、配列で十分な要素があるか）
+          if (!station.lat || !station.lon ||
+              !Array.isArray(station.lat) || station.lat.length < 2 ||
+              !Array.isArray(station.lon) || station.lon.length < 2) {
+            console.warn(`Station ${stnid} has invalid lat/lon data. Skipping.`);
+            continue;
+          }
+          // 座標は [度, 分] の配列なので 10進法に変換
+          const lat = station.lat[0] + station.lat[1] / 60;
+          const lon = station.lon[0] + station.lon[1] / 60;
+
+          // 小さな青い円（circleMarker）を作成
+          const marker = L.circleMarker([lat, lon], {
+            color: 'blue',
+            fillColor: 'blue',
+            fillOpacity: 0.7,
+            radius: 7
+          }).addTo(map);
+
+          // マーカーをクリックしたときのイベント
+          marker.on('click', async function(e) {
+            // クリックイベントがマップに伝播しないようにする
+            e.originalEvent.stopPropagation();
+
+            // すでに別のポップアップが開いていれば閉じる
+            if (currentPopup && currentPopup !== marker.getPopup()) {
+              currentPopup.remove();
+            }
+            
+            // ポップアップの生成（デフォルトではクリックで閉じる動作となる）
+            marker.bindPopup("気温データを取得中...", {
+              offset: L.point(0, -15),  // 表示位置の微調整（数値はお好みで調整）
+              maxWidth: 500,            // ポップアップの最大幅（px）
+              minWidth: 250             // ポップアップの最小幅（px）
+            }).openPopup();
+            currentPopup = marker.getPopup();
+
+            try {
+              // 過去約24時間分（直近の3時間ブロック×8個）の気温データを取得
+              const result = await getTemperatureData(stnid);
+              // ユニークな canvas ID を生成
+              const canvasId = "chartCanvas-" + stnid;
+              // ポップアップ内の内容を canvas タグに変更
+              marker.getPopup().setContent('<canvas id="' + canvasId + '" width="500" height="300"></canvas>');
+              // ポップアップ内容更新後に update() を呼んで再計算
+              marker.getPopup().update();
+
+              // Chart.js を用いて気温グラフを描画
+              const ctx = document.getElementById(canvasId).getContext('2d');
+              new Chart(ctx, {
+                type: 'line',
+                data: {
+                  labels: result.labels,  // 例: ["00:00", "00:10", ... "23:50"]
+                  datasets: [{
+                    label: '気温 (°C)',
+                    data: result.temperatures,
+                    borderColor: 'blue',
+                    backgroundColor: 'rgba(0, 0, 255, 0.1)',
+                    borderWidth: 1,
+                    pointRadius: 1,
+                    pointBackgroundColor: 'blue',
+                    fill: true,
+                    tension: 0
+                  }]
+                },
+                options: {
+                  plugins: {
+                    // グラフタイトルを設定
+                    title: {
+                      display: true,
+                      text: stnid + " " + station.kjName + " " + station.knName + " (標高: " + station.alt + "m)"
+                    },
+                    tooltip: {
+                      mode: 'index',      // カーソルの x 軸（時刻）に合わせたツールチップ表示
+                      intersect: false    // カーソルが正確にプロット上になくてもツールチップを表示
+                    }
+                  },
+                  hover: {
+                    mode: 'index',        // ホバー時も同様のモードに設定
+                    intersect: false
+                  },
+                  scales: {
+                    x: {
+                      ticks: {
+                        autoSkip: false,
+                        callback: function(value, index, ticks) {
+                          // 「:00」で終わる時刻のみ表示する（例："01:00", "02:00", ...）
+                          let label = result.labels[index];
+                          return label.endsWith(':00') ? label : '';
+                        }
+                      },
+                      title: {
+                        display: true,
+                        text: '時刻'
+                      }
+                    },
+                    y: {
+                      title: {
+                        display: true,
+                        text: '気温 (°C)'
+                      }
+                    }
+                  }
+                }
+              });
+            } catch (error) {
+              console.error("温度データ取得エラー:", error);
+              marker.getPopup().setContent("データの取得に失敗しました。");
+            }
+          });
+          // ※ マウスオーバー／アウトでの表示／非表示は削除しています
+        }
+      })
+      .catch(err => {
+        console.error("地点一覧の取得に失敗:", err);
+      });
+
+    /**
+     * 指定された観測所 (stnid) の過去約24時間分の気温データを取得する関数
+     * （最新時刻から直近の3時間ブロックを求め、そこから3時間間隔で8ブロック分のデータを結合）
+     *
+     * @param {string} stnid - 観測所番号（例："11001"）
+     * @returns {Promise<{labels: string[], temperatures: number[]}>}
+     */
+    async function getTemperatureData(stnid) {
+      // 最新時刻（例："2025-02-08T13:40:00+09:00"）の取得
+      const resTime = await fetch("https://www.jma.go.jp/bosai/amedas/data/latest_time.txt");
+      const latestTimeText = (await resTime.text()).trim();
+      const latestTime = new Date(latestTimeText);
+
+      // 直近の3時間ブロックを求める（例：13:40 → 12:00）
+      const currentHour = latestTime.getHours();
+      const blockHour = Math.floor(currentHour / 3) * 3;
+      const baseBlockTime = new Date(latestTime);
+      baseBlockTime.setHours(blockHour, 0, 0, 0);
+
+      // 3時間毎のブロックを8個（約24時間分）のデータを取得
+      let fetchPromises = [];
+      for (let i = 0; i < 8; i++) {
+        let blockTime = new Date(baseBlockTime);
+        blockTime.setHours(baseBlockTime.getHours() - 3 * i);
+        const year = blockTime.getFullYear();
+        const month = String(blockTime.getMonth() + 1).padStart(2, '0');
+        const day = String(blockTime.getDate()).padStart(2, '0');
+        const hour = String(blockTime.getHours()).padStart(2, '0');
+        const yyyymmdd = `${year}${month}${day}`;
+        const url = `https://www.jma.go.jp/bosai/amedas/data/point/${stnid}/${yyyymmdd}_${hour}.json`;
+        
+        fetchPromises.push(
+          fetch(url)
+            .then(response => response.json())
+            .catch(err => {
+              console.error("データ取得失敗:", url, err);
+              return null;
+            })
+        );
+      }
+
+      // 取得したブロックごとのデータを結合
+      const blocksData = await Promise.all(fetchPromises);
+      let combinedData = {};
+      blocksData.forEach(block => {
+        if (block) {
+          for (const timeKey in block) {
+            combinedData[timeKey] = block[timeKey];
+          }
+        }
+      });
+
+      // タイムスタンプ（"YYYYMMDDhhmmss"）でソートし、ラベルと気温データを作成
+      const sortedKeys = Object.keys(combinedData).sort();
+      let labels = [];
+      let temperatures = [];
+      sortedKeys.forEach(key => {
+        const obs = combinedData[key];
+        if (obs && obs.temp && Array.isArray(obs.temp) && obs.temp.length > 0) {
+          const hour = key.substring(8, 10);
+          const minute = key.substring(10, 12);
+          labels.push(`${hour}:${minute}`);
+          temperatures.push(obs.temp[0]);
+        }
+      });
+      return { labels, temperatures };
+    }
+  </script>
+</body>
+</html>
