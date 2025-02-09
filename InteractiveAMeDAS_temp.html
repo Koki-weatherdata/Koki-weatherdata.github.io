@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta charset="utf-8">
-  <title>アメダス気温観測マップ</title>
+  <title>アメダス気温観測マップ（改善版・タイル遅延読み込み対応）</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <!-- Leaflet CSS -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
@@ -39,13 +39,35 @@
   
   <script>
     /********************
-     * 地図初期化とレイヤーグループ設定
+     * 地図初期化とタイル遅延読み込みの設定
      ********************/
     // 地図初期化（日本付近を表示）
     const map = L.map('map').setView([35.6895, 139.6917], 5);
-    L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png', {
-      attribution: "<a href='https://maps.gsi.go.jp/development/ichiran.html' target='_blank'>地理院タイル</a>"
-    }).addTo(map);
+
+    // タイルレイヤーの追加（タイル更新をアイドル時に実施するオプション付き）
+    function addTileLayer() {
+      L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png', {
+        attribution: "<a href='https://maps.gsi.go.jp/development/ichiran.html' target='_blank'>地理院タイル</a>",
+        updateWhenIdle: true // パン中などの連続操作中は更新せず、操作完了後にまとめて更新
+      }).addTo(map);
+    }
+
+    // IntersectionObserver を用いて、マップコンテナが画面内に入ったらタイルレイヤーを追加
+    if ('IntersectionObserver' in window) {
+      const observer = new IntersectionObserver((entries, observer) => {
+        entries.forEach(entry => {
+          if (entry.isIntersecting) {
+            addTileLayer();
+            observer.disconnect(); // 一度読み込んだら監視を終了
+          }
+        });
+      }, { threshold: 0.1 });
+      observer.observe(document.getElementById('map'));
+    } else {
+      // IntersectionObserver 非対応の場合はすぐにタイルレイヤーを追加
+      addTileLayer();
+    }
+
     // 表示領域にあるマーカーのみ追加するレイヤーグループ
     const amedasLayerGroup = L.layerGroup().addTo(map);
 
@@ -70,20 +92,20 @@
       else if (temp < 0) return "#0041ff";
       else if (temp < 5) return "#0096ff";
       else if (temp < 10) return "#b9ebff";
-      else if (temp < 15) return "#ffff96";
-      else if (temp < 20) return "#faf500";
-      else if (temp < 25) return "#ff9900";
-      else if (temp < 30) return "#ff6633";
+      else if (temp < 15) return "#fffff0";
+      else if (temp < 20) return "#ffff96";
+      else if (temp < 25) return "#faf500";
+      else if (temp < 30) return "#ff9900";
       else if (temp < 35) return "#ff2800";
       else return "#b40068";
     }
 
     // 数字表示用アイコン（高倍率時用）
     function getNumberIcon(temp) {
-      var color = getColorForTemperature(temp);
-      var displayTemp = temp.toFixed(1);
+      const color = getColorForTemperature(temp);
+      const displayTemp = temp.toFixed(1);
       // 温度が5℃以上なら黒いアウトライン、そうでなければ白いアウトライン
-      var shadowColor = (temp >= 5) ? "#000" : "#fff";
+      const shadowColor = (temp >= 5) ? "#000" : "#fff";
       return L.divIcon({
         className: 'amedas-marker amedas-number',
         html: '<div style="color:' + color + '; text-shadow: -1px -1px 0 ' + shadowColor +
@@ -95,10 +117,11 @@
 
     // 丸表示用アイコン（低倍率時用）
     function getCircleIcon(temp) {
-      var color = getColorForTemperature(temp);
+      const color = getColorForTemperature(temp);
       return L.divIcon({
         className: 'amedas-marker amedas-circle',
-        html: '<div style="width:100%; height:100%; background:' + color + '; border: 1px solid ' + color + '; border-radius:50%;"></div>',
+        html: '<div style="width:100%; height:100%; background:' + color +
+              '; border: 1px solid ' + color + '; border-radius:50%;"></div>',
         iconSize: [12, 12],
         iconAnchor: [6, 6]
       });
