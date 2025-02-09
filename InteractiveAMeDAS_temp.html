@@ -12,6 +12,12 @@
       width: 100%;
       height: 100vh;
     }
+    /* ※ 数字表示用・丸表示用ともに基本となるスタイル（必要に応じて調整） */
+    .amedas-marker {
+      text-align: center;
+      font-weight: bold;
+      /* 数字表示時は背景などは inline style で指定 */
+    }
   </style>
 </head>
 <body>
@@ -23,6 +29,92 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   
   <script>
+    /********************
+     * ヘルパー関数群
+     ********************/
+
+    // 気温に合わせた色を返す
+    function getColorForTemperature(temp) {
+      if (temp < -5) return "#002080";
+      else if (temp < 0) return "#0041ff";
+      else if (temp < 5) return "#0096ff";
+      else if (temp < 10) return "#b9ebff";
+      else if (temp < 15) return "#ffff96";
+      else if (temp < 20) return "#faf500";
+      else if (temp < 25) return "#ff9900";
+      else if (temp < 30) return "#ff6633";
+      else if (temp < 35) return "#ff2800";
+      else return "#b40068";
+    }
+
+    // 数字表示用のアイコン（高倍率時用）
+    function getNumberIcon(temp) {
+      var color = getColorForTemperature(temp);
+      // 数値のみ表示
+      var displayTemp = temp.toFixed(1);
+      // 温度が5℃以上の場合は黒い縁取り、そうでなければ白い縁取り
+      var shadowColor = (temp >= 5) ? "#000" : "#fff";
+      return L.divIcon({
+        className: 'amedas-marker',
+        html: '<div style="color:' + color + '; font-size:14px; font-weight:bold; text-shadow: -1px -1px 0 ' + shadowColor + ', 1px -1px 0 ' + shadowColor + ', -1px 1px 0 ' + shadowColor + ', 1px 1px 0 ' + shadowColor + ';">' + displayTemp + '</div>',
+        iconSize: null
+      });
+    }
+
+
+
+    // 丸表示用のアイコン（低倍率時用）
+    function getCircleIcon(temp) {
+      var color = getColorForTemperature(temp);
+      return L.divIcon({
+        className: 'amedas-marker',
+        html: '<div style="width:12px; height:12px; background:' + color + '; border: 1px solid ' + color + '; border-radius:50%;"></div>',
+        iconSize: [12, 12],
+        iconAnchor: [6, 6]
+      });
+    }
+
+    // 拡大率（zoom）に応じて各マーカーのアイコンを更新
+    // zoomThreshold 以下なら丸表示、それ以上なら数字表示
+    var zoomThreshold = 8;
+    // すべてのマーカーを格納する配列
+    var amedasMarkers = [];
+    function updateAmedasIcons() {
+      var currentZoom = map.getZoom();
+      amedasMarkers.forEach(function(marker) {
+        var temp = marker.amedasData.temp;
+        if (currentZoom >= zoomThreshold) {
+          marker.setIcon(getNumberIcon(temp));
+        } else {
+          marker.setIcon(getCircleIcon(temp));
+        }
+      });
+    }
+
+    // 全国最新気象データ（map用）の取得
+    async function getLatestMapData() {
+      // 最新時刻の取得（例："2025-02-08T13:40:00+09:00"）
+      const resTime = await fetch("https://www.jma.go.jp/bosai/amedas/data/latest_time.txt");
+      const latestTimeText = (await resTime.text()).trim();
+      const latestTime = new Date(latestTimeText);
+      // フォーマット：YYYYMMDDhhmmss（秒まで）
+      const formatted = 
+            latestTime.getFullYear().toString() +
+            String(latestTime.getMonth() + 1).padStart(2, '0') +
+            String(latestTime.getDate()).padStart(2, '0') +
+            String(latestTime.getHours()).padStart(2, '0') +
+            String(latestTime.getMinutes()).padStart(2, '0') +
+            String(latestTime.getSeconds()).padStart(2, '0');
+      const url = "https://www.jma.go.jp/bosai/amedas/data/map/" + formatted + ".json";
+      const response = await fetch(url);
+      const mapData = await response.json();
+      return mapData;
+    }
+
+    /********************
+     * メイン処理
+     ********************/
+
     // 地図の初期化（日本付近）
     const map = L.map('map').setView([35.6895, 139.6917], 5);
 
@@ -31,161 +123,172 @@
       attribution: "<a href='https://maps.gsi.go.jp/development/ichiran.html' target='_blank'>地理院タイル</a>"
     }).addTo(map);
 
-    // 現在表示中のポップアップを保持するグローバル変数
-    let currentPopup = null;
+    // マップの空白部分クリックでグラフポップアップを閉じる
+    var currentPopup = null;
+    map.on('click', function(e) {
+      if (currentPopup) {
+        currentPopup.remove();
+        currentPopup = null;
+      }
+    });
 
-    // 観測地点一覧の取得
-    fetch("https://www.jma.go.jp/bosai/amedas/const/amedastable.json")
-      .then(response => response.json())
-      .then(data => {
-        // data は各観測所番号（例："11001"）をキーとしたオブジェクト
-        for (const stnid in data) {
-          const station = data[stnid];
+    // 最新の気象データと地点一覧を同時に取得
+    Promise.all([
+      fetch("https://www.jma.go.jp/bosai/amedas/const/amedastable.json").then(r => r.json()),
+      getLatestMapData()
+    ]).then(([amedasData, latestMapData]) => {
+      // 各観測所ごとに処理
+      for (const stnid in amedasData) {
+        const station = amedasData[stnid];
+        if (!station) continue;
+        // elems の先頭が '0' なら気温データがないとみなしスキップ
+        if (!station.elems || station.elems.charAt(0) === '0') continue;
+        // 座標チェック（[度, 分]の配列であること）
+        if (!station.lat || !station.lon ||
+            !Array.isArray(station.lat) || station.lat.length < 2 ||
+            !Array.isArray(station.lon) || station.lon.length < 2) {
+          console.warn(`Station ${stnid} has invalid lat/lon data. Skipping.`);
+          continue;
+        }
+        // 座標を10進法に変換
+        const lat = station.lat[0] + station.lat[1] / 60;
+        const lon = station.lon[0] + station.lon[1] / 60;
 
-          // station が null または undefined ならスキップ
-          if (!station) {
-            console.warn(`Station ${stnid} is null or undefined. Skipping.`);
-            continue;
+        // 最新の気象データから対象観測所の気温を取得
+        const mapObs = latestMapData[stnid];
+        if (!mapObs || !mapObs.temp) continue;
+        const tempValue = mapObs.temp[0];
+        const quality = mapObs.temp[1];
+        if (quality !== 0) continue;  // 品質が0以外は欠測扱い
+
+        // マーカーの表示：現在の拡大率によって数字表示 or 丸表示
+        var currentZoom = map.getZoom();
+        var icon;
+        if (currentZoom >= zoomThreshold) {
+          icon = getNumberIcon(tempValue);
+        } else {
+          icon = getCircleIcon(tempValue);
+        }
+        // マーカー作成（L.marker で作成し、作成時のアイコンを指定）
+        const marker = L.marker([lat, lon], { icon: icon }).addTo(map);
+        // マーカーに必要な情報を保持
+        marker.amedasData = { stnid: stnid, station: station, temp: tempValue };
+        // 配列に登録（後で拡大率に合わせたアイコン更新のため）
+        amedasMarkers.push(marker);
+
+        // マーカークリック時：詳細グラフのポップアップを表示
+        marker.on('click', async function(e) {
+          // クリックイベントの伝播を止める
+          e.originalEvent.stopPropagation();
+          // すでに別のポップアップが開いていれば閉じる
+          if (currentPopup && currentPopup !== marker.getPopup()) {
+            currentPopup.remove();
           }
-          // elems の先頭が '0' なら気温データがないのでスキップ
-          if (!station.elems || station.elems.charAt(0) === '0') continue;
-          // 座標データのチェック（lat, lon が存在し、配列で十分な要素があるか）
-          if (!station.lat || !station.lon ||
-              !Array.isArray(station.lat) || station.lat.length < 2 ||
-              !Array.isArray(station.lon) || station.lon.length < 2) {
-            console.warn(`Station ${stnid} has invalid lat/lon data. Skipping.`);
-            continue;
-          }
-          // 座標は [度, 分] の配列なので 10進法に変換
-          const lat = station.lat[0] + station.lat[1] / 60;
-          const lon = station.lon[0] + station.lon[1] / 60;
+          // ポップアップを生成
+          marker.bindPopup("気温データを取得中...", {
+            offset: L.point(0, -15),
+            maxWidth: 500,
+            minWidth: 200
+          }).openPopup();
+          currentPopup = marker.getPopup();
 
-          // 小さな青い円（circleMarker）を作成
-          const marker = L.circleMarker([lat, lon], {
-            color: 'blue',
-            fillColor: 'blue',
-            fillOpacity: 0.7,
-            radius: 7
-          }).addTo(map);
+          try {
+            // 個別観測所の過去約24時間分の時系列データ取得
+            const result = await getTemperatureData(stnid);
+            // ユニークな canvas ID を生成
+            const canvasId = "chartCanvas-" + stnid;
+            // ポップアップ内の内容を canvas タグに置換
+            marker.getPopup().setContent('<canvas id="' + canvasId + '" width="500" height="300"></canvas>');
+            marker.getPopup().update();
 
-          // マーカーをクリックしたときのイベント
-          marker.on('click', async function(e) {
-            // クリックイベントがマップに伝播しないようにする
-            e.originalEvent.stopPropagation();
-
-            // すでに別のポップアップが開いていれば閉じる
-            if (currentPopup && currentPopup !== marker.getPopup()) {
-              currentPopup.remove();
-            }
-            
-            // ポップアップの生成（デフォルトではクリックで閉じる動作となる）
-            marker.bindPopup("気温データを取得中...", {
-              offset: L.point(0, -15),  // 表示位置の微調整（数値はお好みで調整）
-              maxWidth: 500,            // ポップアップの最大幅（px）
-              minWidth: 250             // ポップアップの最小幅（px）
-            }).openPopup();
-            currentPopup = marker.getPopup();
-
-            try {
-              // 過去約24時間分（直近の3時間ブロック×8個）の気温データを取得
-              const result = await getTemperatureData(stnid);
-              // ユニークな canvas ID を生成
-              const canvasId = "chartCanvas-" + stnid;
-              // ポップアップ内の内容を canvas タグに変更
-              marker.getPopup().setContent('<canvas id="' + canvasId + '" width="500" height="300"></canvas>');
-              // ポップアップ内容更新後に update() を呼んで再計算
-              marker.getPopup().update();
-
-              // Chart.js を用いて気温グラフを描画
-              const ctx = document.getElementById(canvasId).getContext('2d');
-              new Chart(ctx, {
-                type: 'line',
-                data: {
-                  labels: result.labels,  // 例: ["00:00", "00:10", ... "23:50"]
-                  datasets: [{
-                    label: '気温 (°C)',
-                    data: result.temperatures,
-                    borderColor: 'blue',
-                    backgroundColor: 'rgba(0, 0, 255, 0.1)',
-                    borderWidth: 1,
-                    pointRadius: 1,
-                    pointBackgroundColor: 'blue',
-                    fill: true,
-                    tension: 0
-                  }]
+            // Chart.js によりグラフ描画
+            const ctx = document.getElementById(canvasId).getContext('2d');
+            new Chart(ctx, {
+              type: 'line',
+              data: {
+                labels: result.labels,  // 例: ["00:00", "00:10", … "23:50"]
+                datasets: [{
+                  label: '気温 (°C)',
+                  data: result.temperatures,
+                  borderColor: 'blue',
+                  backgroundColor: 'rgba(0, 0, 255, 0.1)',
+                  borderWidth: 1,
+                  pointRadius: 1,
+                  pointBackgroundColor: 'blue',
+                  fill: true,
+                  tension: 0
+                }]
+              },
+              options: {
+                plugins: {
+                  title: {
+                    display: true,
+                    text: stnid + " " + station.kjName + " " + station.knName + " (標高: " + station.alt + "m)"
+                  },
+                  tooltip: {
+                    mode: 'index',
+                    intersect: false
+                  }
                 },
-                options: {
-                  plugins: {
-                    // グラフタイトルを設定
+                hover: {
+                  mode: 'index',
+                  intersect: false
+                },
+                scales: {
+                  x: {
+                    ticks: {
+                      autoSkip: false,
+                      callback: function(value, index, ticks) {
+                        let label = result.labels[index];
+                        return label.endsWith(':00') ? label : '';
+                      }
+                    },
                     title: {
                       display: true,
-                      text: stnid + " " + station.kjName + " " + station.knName + " (標高: " + station.alt + "m)"
-                    },
-                    tooltip: {
-                      mode: 'index',      // カーソルの x 軸（時刻）に合わせたツールチップ表示
-                      intersect: false    // カーソルが正確にプロット上になくてもツールチップを表示
+                      text: '時刻'
                     }
                   },
-                  hover: {
-                    mode: 'index',        // ホバー時も同様のモードに設定
-                    intersect: false
-                  },
-                  scales: {
-                    x: {
-                      ticks: {
-                        autoSkip: false,
-                        callback: function(value, index, ticks) {
-                          // 「:00」で終わる時刻のみ表示する（例："01:00", "02:00", ...）
-                          let label = result.labels[index];
-                          return label.endsWith(':00') ? label : '';
-                        }
-                      },
-                      title: {
-                        display: true,
-                        text: '時刻'
-                      }
-                    },
-                    y: {
-                      title: {
-                        display: true,
-                        text: '気温 (°C)'
-                      }
+                  y: {
+                    title: {
+                      display: true,
+                      text: '気温 (°C)'
                     }
                   }
                 }
-              });
-            } catch (error) {
-              console.error("温度データ取得エラー:", error);
-              marker.getPopup().setContent("データの取得に失敗しました。");
-            }
-          });
-          // ※ マウスオーバー／アウトでの表示／非表示は削除しています
-        }
-      })
-      .catch(err => {
-        console.error("地点一覧の取得に失敗:", err);
-      });
+              }
+            });
+          } catch (error) {
+            console.error("温度データ取得エラー:", error);
+            marker.getPopup().setContent("データの取得に失敗しました。");
+          }
+        });
+      } // 各観測所ループ終わり
+    }).catch(err => {
+      console.error("データ取得に失敗:", err);
+    });
 
+    // 地図の拡大／縮小時に各マーカーのアイコンを更新
+    map.on('zoomend', updateAmedasIcons);
+
+    /********************
+     * 個別地点の時系列データ取得
+     ********************/
     /**
-     * 指定された観測所 (stnid) の過去約24時間分の気温データを取得する関数
-     * （最新時刻から直近の3時間ブロックを求め、そこから3時間間隔で8ブロック分のデータを結合）
-     *
-     * @param {string} stnid - 観測所番号（例："11001"）
+     * 指定された観測所 (stnid) の過去約24時間分の時系列気温データを取得する関数  
+     * 最新時刻から直近の3時間ブロックを求め、そこから3時間間隔で8ブロック分のデータを結合  
+     * @param {string} stnid - 観測所番号（例："11001"）  
      * @returns {Promise<{labels: string[], temperatures: number[]}>}
      */
     async function getTemperatureData(stnid) {
-      // 最新時刻（例："2025-02-08T13:40:00+09:00"）の取得
       const resTime = await fetch("https://www.jma.go.jp/bosai/amedas/data/latest_time.txt");
       const latestTimeText = (await resTime.text()).trim();
       const latestTime = new Date(latestTimeText);
 
-      // 直近の3時間ブロックを求める（例：13:40 → 12:00）
       const currentHour = latestTime.getHours();
       const blockHour = Math.floor(currentHour / 3) * 3;
       const baseBlockTime = new Date(latestTime);
       baseBlockTime.setHours(blockHour, 0, 0, 0);
 
-      // 3時間毎のブロックを8個（約24時間分）のデータを取得
       let fetchPromises = [];
       for (let i = 0; i < 8; i++) {
         let blockTime = new Date(baseBlockTime);
@@ -207,7 +310,6 @@
         );
       }
 
-      // 取得したブロックごとのデータを結合
       const blocksData = await Promise.all(fetchPromises);
       let combinedData = {};
       blocksData.forEach(block => {
@@ -218,7 +320,6 @@
         }
       });
 
-      // タイムスタンプ（"YYYYMMDDhhmmss"）でソートし、ラベルと気温データを作成
       const sortedKeys = Object.keys(combinedData).sort();
       let labels = [];
       let temperatures = [];
