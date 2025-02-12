@@ -1,0 +1,433 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>アメダス積雪深観測マップ</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <!-- Leaflet CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <style>
+    /* 地図表示領域 */
+    #map {
+      width: 100%;
+      height: 100vh;
+    }
+    /* マーカーの基本スタイル */
+    .amedas-marker {
+      text-align: center;
+      font-weight: bold;
+    }
+    /* 数字表示用（背景なし） */
+    .amedas-number {
+      font-size: 14px;
+    }
+    /* 丸表示用 */
+    .amedas-circle {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+    }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  
+  <!-- Leaflet JS -->
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  
+  <script>
+    /********************
+     * 地図初期化とタイル遅延読み込みの設定
+     ********************/
+    // 地図初期化（日本付近を表示）
+    const map = L.map('map').setView([35.6895, 139.6917], 5);
+
+    // タイルレイヤーの追加（updateWhenIdle オプション付き）
+    function addTileLayer() {
+      L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png', {
+        attribution: "<a href='https://maps.gsi.go.jp/development/ichiran.html' target='_blank'>地理院タイル</a>",
+        updateWhenIdle: true
+      }).addTo(map);
+    }
+
+    // IntersectionObserver を用いて、マップコンテナが画面内に入ったらタイルレイヤーを追加
+    if ('IntersectionObserver' in window) {
+      const observer = new IntersectionObserver((entries, observer) => {
+        entries.forEach(entry => {
+          if (entry.isIntersecting) {
+            addTileLayer();
+            observer.disconnect(); // 一度読み込んだら監視を終了
+          }
+        });
+      }, { threshold: 0.1 });
+      observer.observe(document.getElementById('map'));
+    } else {
+      addTileLayer();
+    }
+
+    // 表示領域にあるマーカーのみ追加するレイヤーグループ
+    const amedasLayerGroup = L.layerGroup().addTo(map);
+
+    /********************
+     * ヘルパー関数群
+     ********************/
+    // デバウンス関数：連続呼び出しをまとめる
+    function debounce(func, delay) {
+      let timeout;
+      return function() {
+        const context = this, args = arguments;
+        clearTimeout(timeout);
+        timeout = setTimeout(() => {
+          func.apply(context, args);
+        }, delay);
+      };
+    }
+
+    // 積雪深に合わせた色を返す
+    function getColorForSnow(snow) {
+      if (snow < 1) return "#f2f2ff";
+      else if (snow < 5) return "#a0d2ff";
+      else if (snow < 20) return "#218cff";
+      else if (snow < 50) return "#0041ff";
+      else if (snow < 100) return "#faf500";
+      else if (snow < 150) return "#ff9900";
+      else if (snow < 200) return "#ff2800";
+      else return "#b40068";
+    }
+
+    // 数字表示用アイコン（高倍率時用）【積雪深版】
+    function getNumberIconSnow(snow) {
+      const color = getColorForSnow(snow);
+      const displaySnow = snow.toFixed(0); // 小数点以下なしで表示
+      // 雪がない場合は、見やすいように黒い縁取りを設定
+      const shadowColor = (snow < 1 || (snow >= 50 && snow < 150)) ? "#000" : "#fff";
+      return L.divIcon({
+        className: 'amedas-marker amedas-number',
+        html: '<div style="color:' + color + '; text-shadow: -1px -1px 0 ' + shadowColor +
+              ', 1px -1px 0 ' + shadowColor + ', -1px 1px 0 ' + shadowColor +
+              ', 1px 1px 0 ' + shadowColor + ';">' + displaySnow + '</div>',
+        iconSize: null
+      });
+    }
+
+    // 丸表示用アイコン（低倍率時用）【積雪深版】
+    function getCircleIconSnow(snow) {
+      const color = getColorForSnow(snow);
+      return L.divIcon({
+        className: 'amedas-marker amedas-circle',
+        html: '<div style="width:100%; height:100%; background:' + color +
+              '; border: 1px solid ' + color + '; border-radius:50%;"></div>',
+        iconSize: [12, 12],
+        iconAnchor: [6, 6]
+      });
+    }
+
+    // ズーム閾値：zoom >= zoomThreshold なら数字表示、未満なら丸表示
+    const zoomThreshold = 8;
+    // すべてのマーカーを格納する配列（全観測所）
+    const amedasMarkers = [];
+
+    // 表示中の（画面内の）マーカーのアイコン更新（積雪深版）
+    function updateAmedasIcons() {
+      const currentZoom = map.getZoom();
+      amedasLayerGroup.eachLayer(function(marker) {
+        const snow = marker.snowData.snow;
+        if (currentZoom >= zoomThreshold) {
+          marker.setIcon(getNumberIconSnow(snow));
+        } else {
+          marker.setIcon(getCircleIconSnow(snow));
+        }
+      });
+    }
+
+    // 現在の地図表示領域にあるマーカーのみをレイヤーグループに追加する
+    function updateVisibleMarkers() {
+      const bounds = map.getBounds();
+      amedasMarkers.forEach(function(marker) {
+        if (bounds.contains(marker.getLatLng())) {
+          if (!amedasLayerGroup.hasLayer(marker)) {
+            amedasLayerGroup.addLayer(marker);
+          }
+        } else {
+          if (amedasLayerGroup.hasLayer(marker)) {
+            amedasLayerGroup.removeLayer(marker);
+          }
+        }
+      });
+    }
+
+    /********************
+     * 全国最新データの取得（積雪深版）
+     ********************/
+    async function getLatestMapData() {
+      const resTime = await fetch("https://www.jma.go.jp/bosai/amedas/data/latest_time.txt");
+      const latestTimeText = (await resTime.text()).trim();
+      let latestTime = new Date(latestTimeText);
+      // 積雪深は毎正時のデータのみ存在するため、分・秒・ミリ秒を0に丸める
+      latestTime.setMinutes(0, 0, 0);
+      const formatted = latestTime.getFullYear().toString() +
+                        String(latestTime.getMonth() + 1).padStart(2, '0') +
+                        String(latestTime.getDate()).padStart(2, '0') +
+                        String(latestTime.getHours()).padStart(2, '0') +
+                        "0000"; // 分秒は固定で "0000"
+      const url = "https://www.jma.go.jp/bosai/amedas/data/map/" + formatted + ".json";
+      const response = await fetch(url);
+      const mapData = await response.json();
+      return mapData;
+    }
+
+    /********************
+     * マップのクリックイベント（ポップアップのクローズ処理）
+     ********************/
+    let currentPopup = null;
+    map.on('click', function(e) {
+      if (currentPopup) {
+        currentPopup.remove();
+        currentPopup = null;
+      }
+    });
+
+    /********************
+     * 各観測所データの取得とマーカー作成（積雪深版）
+     ********************/
+    Promise.all([
+      fetch("https://www.jma.go.jp/bosai/amedas/const/amedastable.json").then(r => r.json()),
+      getLatestMapData()
+    ]).then(([amedasData, latestMapData]) => {
+      for (const stnid in amedasData) {
+        const station = amedasData[stnid];
+        if (!station) continue;
+        // elems の6文字目が '0' なら積雪を観測していないと判断する
+        if (!station.elems || station.elems.charAt(5) === '0') continue;
+        if (!station.lat || !station.lon ||
+            !Array.isArray(station.lat) || station.lat.length < 2 ||
+            !Array.isArray(station.lon) || station.lon.length < 2) {
+          console.warn(`Station ${stnid} has invalid lat/lon data. Skipping.`);
+          continue;
+        }
+        // 緯度・経度は「度 + 分/60」で算出
+        const lat = station.lat[0] + station.lat[1] / 60;
+        const lon = station.lon[0] + station.lon[1] / 60;
+        
+        const mapObs = latestMapData[stnid];
+        if (!mapObs || !mapObs.snow) continue;
+        const snowValue = mapObs.snow[0];
+        const quality = mapObs.snow[1];
+        if (quality !== 0) continue;
+        
+        const currentZoom = map.getZoom();
+        const icon = (currentZoom >= zoomThreshold) ? getNumberIconSnow(snowValue) : getCircleIconSnow(snowValue);
+        const marker = L.marker([lat, lon], { icon: icon });
+        marker.snowData = { stnid: stnid, station: station, snow: snowValue };
+
+        // マーカークリック時：詳細グラフのポップアップを表示する処理（積雪深版）
+        marker.on('click', async function(e) {
+          e.originalEvent.stopPropagation();
+          
+          // 既存のポップアップを解除
+          marker.unbindPopup();
+          if (currentPopup && currentPopup !== marker.getPopup()) {
+            currentPopup.remove();
+          }
+          
+          // ポップアップをバインドして表示
+          marker.bindPopup("積雪深データを取得中...", {
+            offset: L.point(0, -15),
+            maxWidth: 500,
+            minWidth: 200
+          });
+          marker.openPopup();
+          currentPopup = marker.getPopup();
+          
+          currentPopup.on('remove', function() {
+            currentPopup = null;
+          });
+          
+          try {
+            const result = await getSnowData(stnid);
+            const canvasId = "chartCanvas-" + stnid;
+            marker.getPopup().setContent('<canvas id="' + canvasId + '" width="500" height="300"></canvas>');
+            marker.getPopup().update();
+            
+            // 期間中の雪深の最小値と最大値からスケールを算出
+            const minVal = Math.min(...result.snowDepths);
+            const maxVal = Math.max(...result.snowDepths);
+            let margin = Math.round((maxVal - minVal) * 0.1);
+            if (margin === 0) margin = 5;
+            const yMin = (minVal === 0 ? 0 : minVal - margin);
+            const yMax = maxVal + margin;
+            
+            // 取得した全ての時刻ラベルを保持
+            const fullLabels = result.labels;
+            // x軸表示用ラベルは、6の倍数時刻のみを表示（その他は空文字）
+            const displayLabels = fullLabels.map(lab => {
+              let hourStr = "";
+              if (lab.indexOf(" ") !== -1) {
+                hourStr = lab.split(" ")[1].substring(0, 2);
+              } else {
+                hourStr = lab.substring(0, 2);
+              }
+              const hourNum = parseInt(hourStr, 10);
+              return (hourNum % 6 === 0 ? lab : "");
+            });
+            
+            const ctx = document.getElementById(canvasId).getContext('2d');
+            new Chart(ctx, {
+              type: 'bar',
+              data: {
+                // x軸ラベルには間引いた表示用ラベルを設定
+                labels: displayLabels,
+                datasets: [{
+                  label: '積雪深 (cm)',
+                  data: result.snowDepths,
+                  backgroundColor: 'rgba(54, 162, 235, 0.5)',
+                  borderColor: 'rgba(54, 162, 235, 1)',
+                  borderWidth: 1
+                }]
+              },
+              options: {
+                plugins: {
+                  title: {
+                    display: true,
+                    text: stnid + " " + station.kjName + " " + station.knName + " (標高: " + station.alt + "m)"
+                  },
+                  tooltip: {
+                    mode: 'index',
+                    intersect: false,
+                    callbacks: {
+                      // ツールチップのタイトルとして、元の完全なラベルを表示
+                      title: function(tooltipItems) {
+                        const index = tooltipItems[0].dataIndex;
+                        return fullLabels[index];
+                      }
+                    }
+                  }
+                },
+                scales: {
+                  x: {
+                    title: {
+                      display: true,
+                      text: '時刻'
+                    },
+                    ticks: {
+                      autoSkip: false,
+                      maxRotation: 45,
+                      minRotation: 45
+                    }
+                  },
+                  y: {
+                    min: yMin,
+                    max: yMax,
+                    title: {
+                      display: true,
+                      text: '積雪深 (cm)'
+                    }
+                  }
+                }
+              }
+            });
+          } catch (error) {
+            console.error("積雪深データ取得エラー:", error);
+            marker.getPopup().setContent("データの取得に失敗しました。");
+          }
+        });
+        
+        amedasMarkers.push(marker);
+      }
+      // 初回描画時、表示領域内のマーカーのみ追加
+      updateVisibleMarkers();
+    }).catch(err => {
+      console.error("データ取得に失敗:", err);
+    });
+
+    /********************
+     * 個別地点の時系列データ取得（積雪深版）
+     ********************/
+    async function getSnowData(stnid) {
+      const resTime = await fetch("https://www.jma.go.jp/bosai/amedas/data/latest_time.txt");
+      const latestTimeText = (await resTime.text()).trim();
+      let latestTime = new Date(latestTimeText);
+      // 正時に丸める（分・秒・ミリ秒を0に）
+      latestTime.setMinutes(0, 0, 0);
+      
+      // 個別地点のデータは3時間ごとのファイル（例：00,03,06,...,21）で提供されるため、
+      // 最新時刻から最も近い3時間刻みの時刻に丸める
+      let baseHour = Math.floor(latestTime.getHours() / 3) * 3;
+      let baseTime = new Date(latestTime);
+      baseTime.setHours(baseHour);
+      
+      let fetchPromises = [];
+      // 3時間間隔で22件（約66時間分）取得
+      for (let i = 0; i < 22; i++) {
+        let blockTime = new Date(baseTime);
+        blockTime.setHours(baseTime.getHours() - 3 * i);
+        const year = blockTime.getFullYear();
+        const month = String(blockTime.getMonth() + 1).padStart(2, '0');
+        const day = String(blockTime.getDate()).padStart(2, '0');
+        const hour = String(blockTime.getHours()).padStart(2, '0');
+        const yyyymmdd = `${year}${month}${day}`;
+        const url = `https://www.jma.go.jp/bosai/amedas/data/point/${stnid}/${yyyymmdd}_${hour}.json`;
+        
+        fetchPromises.push(
+          fetch(url)
+            .then(response => response.json())
+            .catch(err => {
+              console.error("データ取得失敗:", url, err);
+              return null;
+            })
+        );
+      }
+      
+      const blocksData = await Promise.all(fetchPromises);
+      let combinedData = {};
+      blocksData.forEach(block => {
+        if (block) {
+          for (const timeKey in block) {
+            combinedData[timeKey] = block[timeKey];
+          }
+        }
+      });
+      
+      // 結合したデータから、正時（分が"00"）のレコードのみを抽出
+      const sortedKeys = Object.keys(combinedData).sort();
+      let labels = [];
+      let snowDepths = [];
+      let prevDate = "";
+      sortedKeys.forEach(key => {
+        if (key.substring(10, 12) !== "00") return; // 正時のみ対象
+        const obs = combinedData[key];
+        if (obs && obs.snow && Array.isArray(obs.snow) && obs.snow.length > 0) {
+          const datePart = key.substring(0, 8); // YYYYMMDD
+          const hour = key.substring(8, 10);
+          let label = "";
+          // 日付が変わるときは日付も表示（MM/DD形式）
+          if (datePart !== prevDate) {
+            const month = datePart.substring(4, 6);
+            const day = datePart.substring(6, 8);
+            label = `${month}/${day} ${hour}:00`;
+            prevDate = datePart;
+          } else {
+            label = `${hour}:00`;
+          }
+          labels.push(label);
+          snowDepths.push(obs.snow[0]);
+        }
+      });
+      return { labels, snowDepths };
+    }
+
+    /********************
+     * マップ操作時の更新処理（ドラッグ／ズーム後に実行）
+     ********************/
+    map.on('moveend', debounce(() => {
+      updateVisibleMarkers();
+      updateAmedasIcons();
+    }, 200));
+    map.on('zoomend', debounce(() => {
+      updateAmedasIcons();
+    }, 200));
+  </script>
+</body>
+</html>
