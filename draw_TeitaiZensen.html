@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>停滞前線 作画ツール</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            margin: 20px;
+            background-color: #f0f0f0;
+        }
+        h1 {
+            color: #333;
+        }
+        #canvas-container {
+            border: 2px dashed #ccc;
+            margin-bottom: 20px;
+            background-color: white;
+            /* チェッカーボード柄で透明部分を分かりやすくする */
+            background-image:
+                linear-gradient(45deg, #eee 25%, transparent 25%),
+                linear-gradient(-45deg, #eee 25%, transparent 25%),
+                linear-gradient(45deg, transparent 75%, #eee 75%),
+                linear-gradient(-45deg, transparent 75%, #eee 75%);
+            background-size: 20px 20px;
+            background-position: 0 0, 0 10px, 10px -10px, -10px 0px;
+        }
+        canvas {
+            display: block;
+            cursor: crosshair;
+        }
+        .controls {
+            display: flex;
+            gap: 15px;
+        }
+        button {
+            padding: 10px 20px;
+            font-size: 16px;
+            cursor: pointer;
+            border: none;
+            border-radius: 5px;
+            color: white;
+            transition: background-color 0.3s;
+        }
+        #clearBtn {
+            background-color: #f44336; /* 赤 */
+        }
+        #clearBtn:hover {
+            background-color: #d32f2f;
+        }
+        #downloadBtn {
+            background-color: #4CAF50; /* 緑 */
+        }
+        #downloadBtn:hover {
+            background-color: #45a049;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>停滞前線 作画ツール</h1>
+    <p>キャンバス上をクリックして、停滞前線の通過点を指定してください。</p>
+
+    <div id="canvas-container">
+        <canvas id="weatherCanvas" width="800" height="600"></canvas>
+    </div>
+
+    <div class="controls">
+        <button id="clearBtn">クリア</button>
+        <button id="downloadBtn">PNGとしてダウンロード</button>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('weatherCanvas');
+        const ctx = canvas.getContext('2d');
+        const clearBtn = document.getElementById('clearBtn');
+        const downloadBtn = document.getElementById('downloadBtn');
+
+        let userPoints = [];
+        const SYMBOL_SPACING = 40; // 前線記号区間の長さ
+        const SYMBOL_SIZE = 9;     // 前線記号の大きさ
+        const LINE_WIDTH = 2.5;    // 前線の太さ
+
+        // --- イベントリスナー ---
+        canvas.addEventListener('click', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            userPoints.push({ x: e.clientX - rect.left, y: e.clientY - rect.top });
+            draw();
+        });
+
+        clearBtn.addEventListener('click', () => {
+            userPoints = [];
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+        });
+
+        downloadBtn.addEventListener('click', () => {
+            const link = document.createElement('a');
+            link.download = 'stationary_front.png';
+            link.href = canvas.toDataURL('image/png');
+            link.click();
+        });
+
+        // --- 描画メイン関数 ---
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            if (userPoints.length < 2) return;
+
+            // 1. ユーザーのクリック点から滑らかな高密度な点の配列を生成
+            const smoothPath = getSplinePoints(userPoints);
+            
+            // 2. 高密度な点の配列を元に、色分けされた前線と記号を描画
+            drawStationaryFront(smoothPath);
+        }
+
+        // --- 描画ヘルパー関数 ---
+
+        /**
+         * Catmull-Romスプラインを使い、滑らかな点の配列を生成する
+         */
+        function getSplinePoints(points) {
+            const splinePoints = [];
+            for (let i = 0; i < points.length - 1; i++) {
+                const p0 = (i > 0) ? points[i - 1] : points[i];
+                const p1 = points[i];
+                const p2 = points[i + 1];
+                const p3 = (i < points.length - 2) ? points[i + 2] : p2;
+
+                // 2点間を20分割して滑らかな点を生成
+                for (let j = 0; j < 20; j++) {
+                    const t = j / 20;
+                    const x = 0.5 * ((2 * p1.x) + (-p0.x + p2.x) * t + (2 * p0.x - 5 * p1.x + 4 * p2.x - p3.x) * t * t + (-p0.x + 3 * p1.x - 3 * p2.x + p3.x) * t * t * t);
+                    const y = 0.5 * ((2 * p1.y) + (-p0.y + p2.y) * t + (2 * p0.y - 5 * p1.y + 4 * p2.y - p3.y) * t * t + (-p0.y + 3 * p1.y - 3 * p2.y + p3.y) * t * t * t);
+                    splinePoints.push({ x, y });
+                }
+            }
+            splinePoints.push(points[points.length-1]);
+            return splinePoints;
+        }
+
+        /**
+         * 滑らかな点の配列を元に、前線（色分けされた線と記号）を描画する
+         */
+        function drawStationaryFront(path) {
+            let distanceAlongPath = 0;
+            let nextSymbolPosition = SYMBOL_SPACING / 2;
+            
+            ctx.lineWidth = LINE_WIDTH;
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+
+            // 線を小さなセグメントに分けて描画
+            for (let i = 0; i < path.length - 1; i++) {
+                const p1 = path[i];
+                const p2 = path[i+1];
+                
+                const segmentDx = p2.x - p1.x;
+                const segmentDy = p2.y - p1.y;
+                const segmentLength = Math.sqrt(segmentDx * segmentDx + segmentDy * segmentDy);
+
+                // このセグメントの色を決定
+                const symbolIndex = Math.floor(distanceAlongPath / SYMBOL_SPACING);
+                ctx.strokeStyle = (symbolIndex % 2 === 0) ? 'red' : 'blue';
+                
+                // セグメントを描画
+                ctx.beginPath();
+                ctx.moveTo(p1.x, p1.y);
+                ctx.lineTo(p2.x, p2.y);
+                ctx.stroke();
+                
+                // このセグメント上に記号を置くべきか判定
+                if (distanceAlongPath < nextSymbolPosition && (distanceAlongPath + segmentLength) >= nextSymbolPosition) {
+                    const ratio = (nextSymbolPosition - distanceAlongPath) / segmentLength;
+                    const symbolX = p1.x + ratio * segmentDx;
+                    const symbolY = p1.y + ratio * segmentDy;
+                    const angle = Math.atan2(segmentDy, segmentDx);
+
+                    if (symbolIndex % 2 === 0) {
+                        drawSemicircle(symbolX, symbolY, angle); // 赤い半円
+                    } else {
+                        drawTriangle(symbolX, symbolY, angle); // 青い三角形
+                    }
+                    nextSymbolPosition += SYMBOL_SPACING;
+                }
+                
+                distanceAlongPath += segmentLength;
+            }
+        }
+
+        /**
+         * 赤い半円を描画 (線の北側に配置)
+         */
+        function drawSemicircle(x, y, angle) {
+            ctx.save();
+            ctx.translate(x, y);
+            ctx.rotate(angle);
+            
+            ctx.beginPath();
+            ctx.arc(0, 0, SYMBOL_SIZE, Math.PI, 2 * Math.PI, false); // 上半円
+            ctx.fillStyle = 'red';
+            ctx.fill();
+            
+            ctx.restore();
+        }
+
+        /**
+         * 青い三角形を描画 (線の南側を指す)
+         */
+        function drawTriangle(x, y, angle) {
+            ctx.save();
+            ctx.translate(x, y);
+            ctx.rotate(angle);
+            
+            ctx.beginPath();
+            // 底辺が線に接し、頂点が南側(Y+方向)を向くように描画
+            ctx.moveTo(0, SYMBOL_SIZE * 1.2); // 頂点
+            ctx.lineTo(-SYMBOL_SIZE, 0);      // 底辺の左
+            ctx.lineTo(SYMBOL_SIZE, 0);       // 底辺の右
+            ctx.closePath();
+            
+            ctx.fillStyle = 'blue';
+            ctx.fill();
+            
+            ctx.restore();
+        }
+    </script>
+
+</body>
+</html>
