@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>停滞前線 作画ツール</title>
+    <title>前線作画ツール</title>
     <style>
         body {
             font-family: sans-serif;
@@ -41,12 +41,12 @@
         .controls {
             display: flex;
             flex-direction: column;
-            gap: 20px;
+            gap: 15px;
             padding: 20px;
             background-color: #fff;
             border-radius: 8px;
             box-shadow: 0 4px 8px rgba(0,0,0,0.1);
-            min-width: 250px;
+            min-width: 260px;
         }
         .control-group {
             display: flex;
@@ -76,7 +76,7 @@
             gap: 5px;
         }
         input[type="color"] {
-            width: 50px;
+            width: 45px;
             height: 30px;
             border: 1px solid #ccc;
             padding: 0;
@@ -92,86 +92,105 @@
             color: white;
             transition: background-color 0.3s;
         }
-        #downloadBtn { background-color: #4CAF50; }
-        #downloadBtn:hover { background-color: #388E3C; }
-        .action-buttons button {
-             width: 100%;
-        }
         .action-buttons {
             display: flex;
             flex-direction: column;
             gap: 10px;
         }
-        #clearBtn { background-color: #f44336; }
-        #clearBtn:hover { background-color: #d32f2f; }
-        #removeBgBtn { background-color: #ff9800; }
-        #removeBgBtn:hover { background-color: #f57c00; }
-        
-        /* --- 説明セクションのスタイル --- */
-        .usage-guide {
-            margin-top: 40px;
-            padding: 20px;
-            background-color: #fff;
-            border-radius: 8px;
-            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
-            max-width: 800px;
-            width: 90%;
-            border-top: 5px solid #4CAF50;
+        .action-buttons button { width: 100%; }
+        #downloadBtn { background-color: #4CAF50; }
+        #downloadBtn:hover { background-color: #388E3C; }
+        #startNewFrontBtn, #kinkFrontBtn {
+            background-color: #FFFFFF;
+            color: #555;
+            border: 1px solid #ccc;
         }
-        .usage-guide h2 {
-            margin-top: 0;
-            border-bottom: 2px solid #eee;
-            padding-bottom: 10px;
-            font-size: 1.2em;
-        }
-        .usage-guide ul {
-            padding-left: 20px;
-            line-height: 1.7;
-            color: #333;
-        }
-        .usage-guide li {
-            margin-bottom: 10px;
-        }
-        .usage-guide li strong {
-            color: #d32f2f;
+        #startNewFrontBtn:hover, #kinkFrontBtn:hover {
+            background-color: #f0f0f0;
         }
 
+        #clearFrontBtn { background-color: #2196F3; }
+        #clearFrontBtn:hover { background-color: #1976D2; }
+        #removeBgBtn { background-color: #ff9800; }
+        #removeBgBtn:hover { background-color: #f57c00; }
+        #clearBtn { background-color: #f44336; }
+        #clearBtn:hover { background-color: #d32f2f; }
+        
+        .front-type-selector {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+        }
+        .front-type-selector label {
+            padding: 8px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            text-align: center;
+            cursor: pointer;
+            font-weight: normal;
+            transition: background-color 0.3s, color 0.3s;
+        }
+        .front-type-selector input[type="radio"] { display: none; }
+        .front-type-selector input[type="radio"]:checked + label {
+            background-color: #337ab7;
+            color: white;
+            border-color: #2e6da4;
+        }
+
+        .usage-guide { margin-top: 40px; padding: 20px; background-color: #fff; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); max-width: 800px; width: 90%; border-top: 5px solid #4CAF50; }
+        .usage-guide h2 { margin-top: 0; border-bottom: 2px solid #eee; padding-bottom: 10px; font-size: 1.2em; }
+        .usage-guide ul { padding-left: 20px; line-height: 1.7; color: #333; }
+        .usage-guide li { margin-bottom: 10px; }
+        .usage-guide li strong { color: #d32f2f; }
     </style>
 </head>
 <body>
 
-    <h1>停滞前線 作画ツール</h1>
-    <p>各種設定を調整して、停滞前線を描画できます。</p>
+    <h1>前線作画ツール</h1>
+    <p>描画したい前線の種類を選んで、画面をクリックしてください。</p>
 
     <div class="container">
         <div class="controls">
             <div class="control-group">
-                <label for="bgUpload">背景画像</label>
+                <label>描画設定</label>
+                <div class="front-type-selector">
+                    <input type="radio" id="typeStationary" name="frontType" value="stationary" checked>
+                    <label for="typeStationary">停滞前線</label>
+                    <input type="radio" id="typeCold" name="frontType" value="cold">
+                    <label for="typeCold">寒冷前線</label>
+                    <input type="radio" id="typeWarm" name="frontType" value="warm">
+                    <label for="typeWarm">温暖前線</label>
+                    <input type="radio" id="typeOccluded" name="frontType" value="occluded">
+                    <label for="typeOccluded">閉塞前線</label>
+                </div>
+                 <div class="action-buttons" style="margin-top: 10px;">
+                    <button id="kinkFrontBtn">キンクにする</button>
+                    <button id="startNewFrontBtn">新しい前線を開始</button>
+                </div>
+            </div>
+            <div class="control-group">
+                 <label>操作</label>
+                 <div class="action-buttons">
+                    <button id="downloadBtn">PNGとしてダウンロード</button>
+                    <button id="clearFrontBtn">前線のみ削除</button>
+                    <button id="removeBgBtn">背景画像のみ削除</button>
+                    <button id="clearBtn">全てクリア</button>
+                 </div>
+            </div>
+            <div class="control-group">
+                <label>背景画像</label>
                 <input type="file" id="bgUpload" accept="image/*">
             </div>
             <div class="control-group">
-                <label for="sizeSelect">前線のサイズ</label>
+                <label>前線のサイズ</label>
                 <select id="sizeSelect">
                     <option value="0.75">小</option>
                     <option value="1" selected>中（デフォルト）</option>
                     <option value="1.5">大</option>
                 </select>
             </div>
-             <div class="control-group">
-                <label>3. カラー設定</label>
-                <div class="color-picker-container">
-                    <div class="color-picker-wrapper">
-                        <label for="redColorPicker">赤色</label>
-                        <input type="color" id="redColorPicker" value="#FF0000">
-                    </div>
-                    <div class="color-picker-wrapper">
-                        <label for="blueColorPicker">青色</label>
-                        <input type="color" id="blueColorPicker" value="#0000FF">
-                    </div>
-                </div>
-            </div>
             <div class="control-group">
-                <label for="qualitySelect">出力画質</label>
+                <label>出力画質</label>
                 <select id="qualitySelect">
                     <option value="1">低画質（Web共有向け / 等倍）</option>
                     <option value="2" selected>標準（画面表示向け / 2倍）</option>
@@ -180,12 +199,12 @@
                 </select>
             </div>
             <div class="control-group">
-                 <label>操作</label>
-                 <div class="action-buttons">
-                    <button id="downloadBtn">PNGとしてダウンロード</button>
-                    <button id="removeBgBtn">背景画像のみ削除</button>
-                    <button id="clearBtn">全てクリア</button>
-                 </div>
+                <label>カラー設定</label>
+                <div class="color-picker-container">
+                    <div class="color-picker-wrapper"><label for="redColorPicker">暖色</label><input type="color" id="redColorPicker" value="#FF0000"></div>
+                    <div class="color-picker-wrapper"><label for="blueColorPicker">寒色</label><input type="color" id="blueColorPicker" value="#0000FF"></div>
+                    <div class="color-picker-wrapper"><label for="purpleColorPicker">閉塞</label><input type="color" id="purpleColorPicker" value="#800080"></div>
+                </div>
             </div>
         </div>
         <div id="canvas-container">
@@ -196,141 +215,163 @@
     <div class="usage-guide">
         <h2>ツールの使い方</h2>
         <ul>
-            <li>停滞前線を作画することができます。クリックした点が滑らかに結ばれます。</li>
+            <li>前線を作画することができます。クリックした点が滑らかに結ばれます。</li>
             <li>背景画像をアップロードせずに、背景が透明なpngとして出力することもできます。</li>
-            <li><strong>【重要】</strong>前線の記号は、線の進行方向に対して上が赤い半円（赤）、青い三角形（青）となります。そのため、**基本的に右から左に向かってクリック**しないと、前線の向きが一般的な天気図と逆になってしまいます。</li>
-            <li>長い前線を少ないクリック数で一気に描くと、カーブの角度計算が追い付かず、赤い半円や青い三角が連続で表示されることがあります。**なるべく短い間隔で点をクリック**すると改善します。</li>
-            <li>今後は寒冷前線や温暖前線、閉塞前線も描画できるようにUpdateする予定です。</li>
+            <li><strong>【重要】</strong>前線の記号は、線の進行方向に対して記号が付きます。**基本的に右から左（東から西）に向かってクリック**すると、一般的な天気図の向きになります。</li>
+            <li>作図の途中で「前線の種類」を切り替えることで、一本の線上で前線の種類を変更できます。ex) 停滞前線から寒冷前線に切り替え</li>
+            <li>「キンクにする」ボタンを押すと、最後にクリックした点を角にして、前線を鋭角に曲げることができます。ex) 梅雨前線上のキンク、低気圧中心</li>
+            <li>一本目の前線を描き終えたら「新しい前線を開始」ボタンを押すと、別の前線を描き始めることができます。</li>
+            <li>PCでの操作を想定しています。スマートフォンでは正常に動作しない可能性があります。</li>
         </ul>
     </div>
+
     <script>
         const canvas = document.getElementById('weatherCanvas');
         const ctx = canvas.getContext('2d');
         
-        // --- コントロール要素 ---
         const bgUpload = document.getElementById('bgUpload');
         const qualitySelect = document.getElementById('qualitySelect');
         const sizeSelect = document.getElementById('sizeSelect');
         const redColorPicker = document.getElementById('redColorPicker');
         const blueColorPicker = document.getElementById('blueColorPicker');
+        const purpleColorPicker = document.getElementById('purpleColorPicker');
         const clearBtn = document.getElementById('clearBtn');
         const downloadBtn = document.getElementById('downloadBtn');
         const removeBgBtn = document.getElementById('removeBgBtn');
+        const clearFrontBtn = document.getElementById('clearFrontBtn');
+        const startNewFrontBtn = document.getElementById('startNewFrontBtn');
+        const kinkFrontBtn = document.getElementById('kinkFrontBtn');
+        const frontTypeRadios = document.querySelectorAll('input[name="frontType"]');
 
-        // --- 状態変数 ---
-        let userPoints = [];
+        let allFronts = [[]];
         let backgroundImage = null;
-        let frontColorRed = '#FF0000';
-        let frontColorBlue = '#0000FF';
+        let frontColors = { red: '#FF0000', blue: '#0000FF', purple: '#800080' };
         let sizeMultiplier = 1.0;
+        let currentFrontType = 'stationary';
 
-        // --- 定数 ---
-        const BASE_PARAMS = {
-            spacing: 40,
-            size: 9,
-            width: 2.5
-        };
+        const BASE_PARAMS = { spacing: 40, size: 9, width: 2.5 };
 
-        // --- イベントリスナー ---
+        // --- Event Listeners ---
 
-        // 背景アップロード
+        frontTypeRadios.forEach(radio => { radio.addEventListener('change', (e) => { currentFrontType = e.target.value; }); });
         bgUpload.addEventListener('change', (e) => {
-            const file = e.target.files[0];
-            if (!file) return;
+            const file = e.target.files[0]; if (!file) return;
             const reader = new FileReader();
             reader.onload = (event) => {
                 const img = new Image();
-                img.onload = () => {
-                    backgroundImage = img;
-                    canvas.width = img.width;
-                    canvas.height = img.height;
-                    draw();
-                };
+                img.onload = () => { backgroundImage = img; canvas.width = img.width; canvas.height = img.height; draw(); };
                 img.src = event.target.result;
             };
             reader.readAsDataURL(file);
         });
-
-        // キャンバスクリック
         canvas.addEventListener('click', (e) => {
             const rect = canvas.getBoundingClientRect();
-            const x = e.clientX - rect.left;
-            const y = e.clientY - rect.top;
-            userPoints.push({ x, y });
+            const x = e.clientX - rect.left; const y = e.clientY - rect.top;
+            allFronts[allFronts.length - 1].push({ x, y, type: currentFrontType });
             flashPoint(x, y);
         });
-
-        // 背景画像を削除
-        removeBgBtn.addEventListener('click', () => {
-            backgroundImage = null;
-            bgUpload.value = ''; // ファイル選択もリセット
-            draw();
+        startNewFrontBtn.addEventListener('click', () => {
+            if (allFronts[allFronts.length - 1].length > 0) {
+                allFronts.push([]);
+            }
         });
-        
-        // 全てクリア
-        clearBtn.addEventListener('click', () => {
-            userPoints = [];
-            backgroundImage = null;
-            bgUpload.value = '';
-            canvas.width = 800;
-            canvas.height = 600;
-            draw();
+        kinkFrontBtn.addEventListener('click', () => {
+            const currentFront = allFronts[allFronts.length - 1];
+            if (currentFront.length > 0) {
+                const lastPoint = currentFront[currentFront.length - 1];
+                allFronts.push([lastPoint]);
+            }
         });
-
-        // 色やサイズの設定が変更されたら再描画
-        redColorPicker.addEventListener('input', (e) => { frontColorRed = e.target.value; draw(); });
-        blueColorPicker.addEventListener('input', (e) => { frontColorBlue = e.target.value; draw(); });
+        clearFrontBtn.addEventListener('click', () => { allFronts = [[]]; draw(); });
+        removeBgBtn.addEventListener('click', () => { backgroundImage = null; bgUpload.value = ''; draw(); });
+        clearBtn.addEventListener('click', () => { allFronts = [[]]; backgroundImage = null; bgUpload.value = ''; canvas.width = 800; canvas.height = 600; draw(); });
+        redColorPicker.addEventListener('input', (e) => { frontColors.red = e.target.value; draw(); });
+        blueColorPicker.addEventListener('input', (e) => { frontColors.blue = e.target.value; draw(); });
+        purpleColorPicker.addEventListener('input', (e) => { frontColors.purple = e.target.value; draw(); });
         sizeSelect.addEventListener('change', (e) => { sizeMultiplier = parseFloat(e.target.value); draw(); });
         
-        // ダウンロード
         downloadBtn.addEventListener('click', () => {
             const scale = parseFloat(qualitySelect.value);
             const offscreenCanvas = document.createElement('canvas');
-            offscreenCanvas.width = canvas.width * scale;
-            offscreenCanvas.height = canvas.height * scale;
+            offscreenCanvas.width = canvas.width * scale; offscreenCanvas.height = canvas.height * scale;
             const offCtx = offscreenCanvas.getContext('2d');
-            
-            if (backgroundImage) {
-                offCtx.drawImage(backgroundImage, 0, 0, offscreenCanvas.width, offscreenCanvas.height);
-            }
-            
-            if (userPoints.length < 2) {
-                 alert("前線を描画してください。");
-                 return;
-            }
-
-            const currentSize = sizeMultiplier;
-            const scaledPoints = userPoints.map(p => ({ x: p.x * scale, y: p.y * scale }));
-            const scaledParams = {
-                spacing: BASE_PARAMS.spacing * currentSize * scale,
-                size: BASE_PARAMS.size * currentSize * scale,
-                width: BASE_PARAMS.width * currentSize * scale
-            };
-            
-            const smoothPath = getSplinePoints(scaledPoints);
-            drawStationaryFront(smoothPath, offCtx, scaledParams);
-
+            if (backgroundImage) { offCtx.drawImage(backgroundImage, 0, 0, offscreenCanvas.width, offscreenCanvas.height); }
+            drawOnContext(offCtx, scale);
             const link = document.createElement('a');
-            link.download = `stationary_front_${offscreenCanvas.width}x${offscreenCanvas.height}.png`;
+            link.download = `weather_front_${offscreenCanvas.width}x${offscreenCanvas.height}.png`;
             link.href = offscreenCanvas.toDataURL('image/png');
             link.click();
         });
 
-        // --- 描画メイン関数 ---
+        // --- Main Drawing Logic ---
         function draw() {
             ctx.clearRect(0, 0, canvas.width, canvas.height);
-            if (backgroundImage) {
-                ctx.drawImage(backgroundImage, 0, 0);
+            if (backgroundImage) { ctx.drawImage(backgroundImage, 0, 0); }
+            drawOnContext(ctx, 1.0);
+        }
+        
+        function drawOnContext(context, scale) {
+            for (const userPoints of allFronts) {
+                if (userPoints.length < 2) continue;
+
+                const currentSize = sizeMultiplier;
+                const scaledPoints = userPoints.map(p => ({ x: p.x * scale, y: p.y * scale, type: p.type }));
+                const smoothPath = getSplinePoints(scaledPoints);
+                const params = {
+                    spacing: BASE_PARAMS.spacing * currentSize * scale,
+                    size: BASE_PARAMS.size * currentSize * scale,
+                    width: BASE_PARAMS.width * currentSize * scale
+                };
+                
+                let distanceToNextSymbol = params.spacing / 2;
+                let stationarySymbolToggle = true;
+
+                context.lineWidth = params.width; context.lineCap = 'round'; context.lineJoin = 'round';
+
+                for (let i = 0; i < smoothPath.length - 1; i++) {
+                    const p1 = smoothPath[i]; const p2 = smoothPath[i+1];
+                    const segmentDx = p2.x - p1.x; const segmentDy = p2.y - p1.y;
+                    let segmentLength = Math.sqrt(segmentDx * segmentDx + segmentDy * segmentDy);
+                    const userSegmentIndex = Math.min(Math.floor(i / 20), scaledPoints.length - 2);
+                    const segmentType = scaledPoints[userSegmentIndex + 1].type;
+
+                    let strokeColor;
+                    switch (segmentType) {
+                        case 'stationary':
+                            const halfwayPoint = params.spacing / 2;
+                            const isNextSymbolRed = stationarySymbolToggle;
+                            if (distanceToNextSymbol > halfwayPoint) {
+                                strokeColor = isNextSymbolRed ? frontColors.blue : frontColors.red;
+                            } else {
+                                strokeColor = isNextSymbolRed ? frontColors.red : frontColors.blue;
+                            }
+                            break;
+                        case 'cold': strokeColor = frontColors.blue; break;
+                        case 'warm': strokeColor = frontColors.red; break;
+                        case 'occluded': strokeColor = frontColors.purple; break;
+                    }
+                    context.strokeStyle = strokeColor;
+                    context.beginPath(); context.moveTo(p1.x, p1.y); context.lineTo(p2.x, p2.y); context.stroke();
+
+                    distanceToNextSymbol -= segmentLength;
+                    while (distanceToNextSymbol <= 0) {
+                        const ratio = 1 - (-distanceToNextSymbol / segmentLength);
+                        const symbolX = p1.x + ratio * segmentDx; const symbolY = p1.y + ratio * segmentDy;
+                        const angle = Math.atan2(segmentDy, segmentDx);
+                        switch (segmentType) {
+                            case 'stationary':
+                                if (stationarySymbolToggle) drawSemicircle(symbolX, symbolY, angle, context, params, frontColors.red);
+                                else drawTriangle(symbolX, symbolY, angle, context, params, frontColors.blue);
+                                stationarySymbolToggle = !stationarySymbolToggle;
+                                break;
+                            case 'cold': drawTriangle(symbolX, symbolY, angle, context, params, frontColors.blue); break;
+                            case 'warm': drawSemicircle(symbolX, symbolY, angle, context, params, frontColors.red); break;
+                            case 'occluded': drawOccludedSymbols(symbolX, symbolY, angle, context, params, frontColors.purple); break;
+                        }
+                        distanceToNextSymbol += params.spacing;
+                    }
+                }
             }
-            if (userPoints.length < 2) return;
-            
-            const currentParams = {
-                spacing: BASE_PARAMS.spacing * sizeMultiplier,
-                size: BASE_PARAMS.size * sizeMultiplier,
-                width: BASE_PARAMS.width * sizeMultiplier
-            };
-            const smoothPath = getSplinePoints(userPoints);
-            drawStationaryFront(smoothPath, ctx, currentParams);
         }
         
         function flashPoint(x, y) {
@@ -341,13 +382,12 @@
             setTimeout(draw, 150);
         }
         
-        // --- 描画ヘルパー関数 ---
         function getSplinePoints(points) {
             const splinePoints = [];
+            if (points.length < 2) return [];
             for (let i = 0; i < points.length - 1; i++) {
                 const p0 = (i > 0) ? points[i - 1] : points[i];
-                const p1 = points[i];
-                const p2 = points[i + 1];
+                const p1 = points[i]; const p2 = points[i + 1];
                 const p3 = (i < points.length - 2) ? points[i + 2] : p2;
                 for (let j = 0; j < 20; j++) {
                     const t = j / 20;
@@ -360,73 +400,28 @@
             return splinePoints;
         }
 
-        function drawStationaryFront(path, context, params) {
-            let distanceAlongPath = 0;
-            let nextSymbolPosition = params.spacing / 2;
-            
-            context.lineWidth = params.width;
-            context.lineCap = 'round';
-            context.lineJoin = 'round';
-
-            for (let i = 0; i < path.length - 1; i++) {
-                const p1 = path[i];
-                const p2 = path[i+1];
-                const segmentDx = p2.x - p1.x;
-                const segmentDy = p2.y - p1.y;
-                const segmentLength = Math.sqrt(segmentDx * segmentDx + segmentDy * segmentDy);
-                const symbolIndex = Math.floor(distanceAlongPath / params.spacing);
-                
-                context.strokeStyle = (symbolIndex % 2 === 0) ? frontColorRed : frontColorBlue;
-                
-                context.beginPath();
-                context.moveTo(p1.x, p1.y);
-                context.lineTo(p2.x, p2.y);
-                context.stroke();
-                
-                if (distanceAlongPath < nextSymbolPosition && (distanceAlongPath + segmentLength) >= nextSymbolPosition) {
-                    const ratio = (nextSymbolPosition - distanceAlongPath) / segmentLength;
-                    const symbolX = p1.x + ratio * segmentDx;
-                    const symbolY = p1.y + ratio * segmentDy;
-                    const angle = Math.atan2(segmentDy, segmentDx);
-
-                    if (symbolIndex % 2 === 0) {
-                        drawSemicircle(symbolX, symbolY, angle, context, params);
-                    } else {
-                        drawTriangle(symbolX, symbolY, angle, context, params);
-                    }
-                    nextSymbolPosition += params.spacing;
-                }
-                distanceAlongPath += segmentLength;
-            }
+        function drawSemicircle(x, y, angle, context, params, color) {
+            context.save(); context.translate(x, y); context.rotate(angle);
+            context.beginPath(); context.arc(0, 0, params.size, Math.PI, 2 * Math.PI, false);
+            context.fillStyle = color; context.fill(); context.restore();
         }
-
-        function drawSemicircle(x, y, angle, context, params) {
-            context.save();
-            context.translate(x, y);
-            context.rotate(angle);
-            context.beginPath();
-            context.arc(0, 0, params.size, Math.PI, 2 * Math.PI, false);
-            context.fillStyle = frontColorRed;
-            context.fill();
-            context.restore();
+        function drawTriangle(x, y, angle, context, params, color) { // Downward
+            context.save(); context.translate(x, y); context.rotate(angle);
+            context.beginPath(); context.moveTo(0, params.size * 1.2); context.lineTo(-params.size, 0); context.lineTo(params.size, 0); context.closePath();
+            context.fillStyle = color; context.fill(); context.restore();
         }
-
-        function drawTriangle(x, y, angle, context, params) {
-            context.save();
-            context.translate(x, y);
-            context.rotate(angle);
-            context.beginPath();
-            context.moveTo(0, params.size * 1.2);
-            context.lineTo(-params.size, 0);
-            context.lineTo(params.size, 0);
-            context.closePath();
-            context.fillStyle = frontColorBlue;
-            context.fill();
-            context.restore();
+        function drawUpwardTriangle(x, y, angle, context, params, color) { // Upward
+            context.save(); context.translate(x, y); context.rotate(angle);
+            context.beginPath(); context.moveTo(0, -params.size * 1.2); context.lineTo(-params.size, 0); context.lineTo(params.size, 0); context.closePath();
+            context.fillStyle = color; context.fill(); context.restore();
+        }
+        function drawOccludedSymbols(x, y, angle, context, params, color) {
+            const offsetMultiplier = 0.85; 
+            const offsetX = Math.cos(angle) * params.size * offsetMultiplier;
+            const offsetY = Math.sin(angle) * params.size * offsetMultiplier;
+            drawSemicircle(x - offsetX, y - offsetY, angle, context, params, color);
+            drawUpwardTriangle(x + offsetX, y + offsetY, angle, context, params, color);
         }
     </script>
-
 </body>
 </html>
-
-
