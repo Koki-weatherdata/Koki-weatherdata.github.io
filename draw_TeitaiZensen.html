@@ -13,14 +13,16 @@
             margin: 20px;
             background-color: #f0f0f0;
         }
-        h1 {
-            color: #333;
+        .container {
+            display: flex;
+            gap: 30px;
+            align-items: flex-start;
+            flex-wrap: wrap;
+            justify-content: center;
         }
         #canvas-container {
             border: 2px dashed #ccc;
-            margin-bottom: 20px;
             background-color: white;
-            /* チェッカーボード柄で透明部分を分かりやすくする */
             background-image:
                 linear-gradient(45deg, #eee 25%, transparent 25%),
                 linear-gradient(-45deg, #eee 25%, transparent 25%),
@@ -28,14 +30,38 @@
                 linear-gradient(-45deg, transparent 75%, #eee 75%);
             background-size: 20px 20px;
             background-position: 0 0, 0 10px, 10px -10px, -10px 0px;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
         }
         canvas {
             display: block;
+            max-width: 100%;
+            height: auto;
             cursor: crosshair;
         }
         .controls {
             display: flex;
-            gap: 15px;
+            flex-direction: column;
+            gap: 20px;
+            padding: 20px;
+            background-color: #fff;
+            border-radius: 8px;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+            min-width: 250px;
+        }
+        .control-group {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        label {
+            font-weight: bold;
+            color: #555;
+        }
+        input[type="file"], select {
+            padding: 8px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            width: 100%;
         }
         button {
             padding: 10px 20px;
@@ -46,81 +72,146 @@
             color: white;
             transition: background-color 0.3s;
         }
-        #clearBtn {
-            background-color: #f44336; /* 赤 */
-        }
-        #clearBtn:hover {
-            background-color: #d32f2f;
-        }
-        #downloadBtn {
-            background-color: #4CAF50; /* 緑 */
-        }
-        #downloadBtn:hover {
-            background-color: #45a049;
-        }
+        #clearBtn { background-color: #f44336; }
+        #clearBtn:hover { background-color: #d32f2f; }
+        #downloadBtn { background-color: #4CAF50; }
+        #downloadBtn:hover { background-color: #388E3C; }
     </style>
 </head>
 <body>
 
     <h1>停滞前線 作画ツール</h1>
-    <p>キャンバス上をクリックして、停滞前線の通過点を指定してください。</p>
+    <p>地図画像をアップロードし、キャンバス上をクリックして前線を描画してください。</p>
 
-    <div id="canvas-container">
-        <canvas id="weatherCanvas" width="800" height="600"></canvas>
-    </div>
-
-    <div class="controls">
-        <button id="clearBtn">クリア</button>
-        <button id="downloadBtn">PNGとしてダウンロード</button>
+    <div class="container">
+        <div class="controls">
+            <div class="control-group">
+                <label for="bgUpload">1. 背景画像のアップロード</label>
+                <input type="file" id="bgUpload" accept="image/*">
+            </div>
+            <div class="control-group">
+                <label for="qualitySelect">2. 出力画質</label>
+                <select id="qualitySelect">
+                    <option value="1">低画質（Web共有向け / 等倍）</option>
+                    <option value="2" selected>標準（画面表示向け / 2倍）</option>
+                    <option value="3">高画質（印刷推奨 / 3倍）</option>
+                    <option value="4">最高画質（大判印刷向け / 4倍）</option>
+                </select>
+            </div>
+            <div class="control-group">
+                 <label>3. 操作</label>
+                <button id="downloadBtn">PNGとしてダウンロード</button>
+                <button id="clearBtn">前線をクリア</button>
+            </div>
+        </div>
+        <div id="canvas-container">
+            <canvas id="weatherCanvas" width="800" height="600"></canvas>
+        </div>
     </div>
 
     <script>
         const canvas = document.getElementById('weatherCanvas');
         const ctx = canvas.getContext('2d');
+        const bgUpload = document.getElementById('bgUpload');
+        const qualitySelect = document.getElementById('qualitySelect'); // IDを変更
         const clearBtn = document.getElementById('clearBtn');
         const downloadBtn = document.getElementById('downloadBtn');
 
         let userPoints = [];
-        const SYMBOL_SPACING = 40; // 前線記号区間の長さ
-        const SYMBOL_SIZE = 9;     // 前線記号の大きさ
-        const LINE_WIDTH = 2.5;    // 前線の太さ
+        let backgroundImage = null;
+        
+        const SYMBOL_SPACING = 40;
+        const SYMBOL_SIZE = 9;
+        const LINE_WIDTH = 2.5;
 
         // --- イベントリスナー ---
+
+        bgUpload.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                const img = new Image();
+                img.onload = () => {
+                    backgroundImage = img;
+                    canvas.width = img.width;
+                    canvas.height = img.height;
+                    draw();
+                };
+                img.src = event.target.result;
+            };
+            reader.readAsDataURL(file);
+        });
+
         canvas.addEventListener('click', (e) => {
             const rect = canvas.getBoundingClientRect();
-            userPoints.push({ x: e.clientX - rect.left, y: e.clientY - rect.top });
-            draw();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+            userPoints.push({ x, y });
+            flashPoint(x, y);
         });
 
         clearBtn.addEventListener('click', () => {
             userPoints = [];
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            draw();
         });
 
         downloadBtn.addEventListener('click', () => {
+            // プルダウンメニューからスケール値を取得
+            const scale = parseFloat(qualitySelect.value);
+            
+            const offscreenCanvas = document.createElement('canvas');
+            offscreenCanvas.width = canvas.width * scale;
+            offscreenCanvas.height = canvas.height * scale;
+            const offCtx = offscreenCanvas.getContext('2d');
+            
+            if (backgroundImage) {
+                offCtx.drawImage(backgroundImage, 0, 0, offscreenCanvas.width, offscreenCanvas.height);
+            }
+            
+            if (userPoints.length < 2) return;
+
+            const scaledPoints = userPoints.map(p => ({ x: p.x * scale, y: p.y * scale }));
+            const scaledParams = {
+                spacing: SYMBOL_SPACING * scale,
+                size: SYMBOL_SIZE * scale,
+                width: LINE_WIDTH * scale
+            };
+            
+            const smoothPath = getSplinePoints(scaledPoints);
+            drawStationaryFront(smoothPath, offCtx, scaledParams);
+
             const link = document.createElement('a');
-            link.download = 'stationary_front.png';
-            link.href = canvas.toDataURL('image/png');
+            link.download = `stationary_front_${offscreenCanvas.width}x${offscreenCanvas.height}.png`;
+            link.href = offscreenCanvas.toDataURL('image/png');
             link.click();
         });
 
         // --- 描画メイン関数 ---
         function draw() {
             ctx.clearRect(0, 0, canvas.width, canvas.height);
+            if (backgroundImage) {
+                ctx.drawImage(backgroundImage, 0, 0);
+            }
             if (userPoints.length < 2) return;
 
-            // 1. ユーザーのクリック点から滑らかな高密度な点の配列を生成
             const smoothPath = getSplinePoints(userPoints);
-            
-            // 2. 高密度な点の配列を元に、色分けされた前線と記号を描画
-            drawStationaryFront(smoothPath);
+            drawStationaryFront(smoothPath, ctx, {
+                spacing: SYMBOL_SPACING,
+                size: SYMBOL_SIZE,
+                width: LINE_WIDTH
+            });
         }
-
+        
+        function flashPoint(x, y) {
+            ctx.fillStyle = 'rgba(255, 0, 0, 0.7)';
+            ctx.beginPath();
+            ctx.arc(x, y, 10, 0, Math.PI * 2);
+            ctx.fill();
+            setTimeout(draw, 150);
+        }
+        
         // --- 描画ヘルパー関数 ---
-
-        /**
-         * Catmull-Romスプラインを使い、滑らかな点の配列を生成する
-         */
         function getSplinePoints(points) {
             const splinePoints = [];
             for (let i = 0; i < points.length - 1; i++) {
@@ -128,8 +219,6 @@
                 const p1 = points[i];
                 const p2 = points[i + 1];
                 const p3 = (i < points.length - 2) ? points[i + 2] : p2;
-
-                // 2点間を20分割して滑らかな点を生成
                 for (let j = 0; j < 20; j++) {
                     const t = j / 20;
                     const x = 0.5 * ((2 * p1.x) + (-p0.x + p2.x) * t + (2 * p0.x - 5 * p1.x + 4 * p2.x - p3.x) * t * t + (-p0.x + 3 * p1.x - 3 * p2.x + p3.x) * t * t * t);
@@ -141,37 +230,28 @@
             return splinePoints;
         }
 
-        /**
-         * 滑らかな点の配列を元に、前線（色分けされた線と記号）を描画する
-         */
-        function drawStationaryFront(path) {
+        function drawStationaryFront(path, context, params) {
             let distanceAlongPath = 0;
-            let nextSymbolPosition = SYMBOL_SPACING / 2;
+            let nextSymbolPosition = params.spacing / 2;
             
-            ctx.lineWidth = LINE_WIDTH;
-            ctx.lineCap = 'round';
-            ctx.lineJoin = 'round';
+            context.lineWidth = params.width;
+            context.lineCap = 'round';
+            context.lineJoin = 'round';
 
-            // 線を小さなセグメントに分けて描画
             for (let i = 0; i < path.length - 1; i++) {
                 const p1 = path[i];
                 const p2 = path[i+1];
-                
                 const segmentDx = p2.x - p1.x;
                 const segmentDy = p2.y - p1.y;
                 const segmentLength = Math.sqrt(segmentDx * segmentDx + segmentDy * segmentDy);
-
-                // このセグメントの色を決定
-                const symbolIndex = Math.floor(distanceAlongPath / SYMBOL_SPACING);
-                ctx.strokeStyle = (symbolIndex % 2 === 0) ? 'red' : 'blue';
+                const symbolIndex = Math.floor(distanceAlongPath / params.spacing);
+                context.strokeStyle = (symbolIndex % 2 === 0) ? 'red' : 'blue';
                 
-                // セグメントを描画
-                ctx.beginPath();
-                ctx.moveTo(p1.x, p1.y);
-                ctx.lineTo(p2.x, p2.y);
-                ctx.stroke();
+                context.beginPath();
+                context.moveTo(p1.x, p1.y);
+                context.lineTo(p2.x, p2.y);
+                context.stroke();
                 
-                // このセグメント上に記号を置くべきか判定
                 if (distanceAlongPath < nextSymbolPosition && (distanceAlongPath + segmentLength) >= nextSymbolPosition) {
                     const ratio = (nextSymbolPosition - distanceAlongPath) / segmentLength;
                     const symbolX = p1.x + ratio * segmentDx;
@@ -179,52 +259,39 @@
                     const angle = Math.atan2(segmentDy, segmentDx);
 
                     if (symbolIndex % 2 === 0) {
-                        drawSemicircle(symbolX, symbolY, angle); // 赤い半円
+                        drawSemicircle(symbolX, symbolY, angle, context, params);
                     } else {
-                        drawTriangle(symbolX, symbolY, angle); // 青い三角形
+                        drawTriangle(symbolX, symbolY, angle, context, params);
                     }
-                    nextSymbolPosition += SYMBOL_SPACING;
+                    nextSymbolPosition += params.spacing;
                 }
-                
                 distanceAlongPath += segmentLength;
             }
         }
 
-        /**
-         * 赤い半円を描画 (線の北側に配置)
-         */
-        function drawSemicircle(x, y, angle) {
-            ctx.save();
-            ctx.translate(x, y);
-            ctx.rotate(angle);
-            
-            ctx.beginPath();
-            ctx.arc(0, 0, SYMBOL_SIZE, Math.PI, 2 * Math.PI, false); // 上半円
-            ctx.fillStyle = 'red';
-            ctx.fill();
-            
-            ctx.restore();
+        function drawSemicircle(x, y, angle, context, params) {
+            context.save();
+            context.translate(x, y);
+            context.rotate(angle);
+            context.beginPath();
+            context.arc(0, 0, params.size, Math.PI, 2 * Math.PI, false);
+            context.fillStyle = 'red';
+            context.fill();
+            context.restore();
         }
 
-        /**
-         * 青い三角形を描画 (線の南側を指す)
-         */
-        function drawTriangle(x, y, angle) {
-            ctx.save();
-            ctx.translate(x, y);
-            ctx.rotate(angle);
-            
-            ctx.beginPath();
-            // 底辺が線に接し、頂点が南側(Y+方向)を向くように描画
-            ctx.moveTo(0, SYMBOL_SIZE * 1.2); // 頂点
-            ctx.lineTo(-SYMBOL_SIZE, 0);      // 底辺の左
-            ctx.lineTo(SYMBOL_SIZE, 0);       // 底辺の右
-            ctx.closePath();
-            
-            ctx.fillStyle = 'blue';
-            ctx.fill();
-            
-            ctx.restore();
+        function drawTriangle(x, y, angle, context, params) {
+            context.save();
+            context.translate(x, y);
+            context.rotate(angle);
+            context.beginPath();
+            context.moveTo(0, params.size * 1.2);
+            context.lineTo(-params.size, 0);
+            context.lineTo(params.size, 0);
+            context.closePath();
+            context.fillStyle = 'blue';
+            context.fill();
+            context.restore();
         }
     </script>
 
