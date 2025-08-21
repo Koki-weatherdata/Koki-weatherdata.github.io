@@ -267,7 +267,19 @@
         });
         canvas.addEventListener('click', (e) => {
             const rect = canvas.getBoundingClientRect();
-            const x = e.clientX - rect.left; const y = e.clientY - rect.top;
+        
+            // canvasの内部解像度と表示サイズの比率を計算
+            const scaleX = canvas.width / rect.width;
+            const scaleY = canvas.height / rect.height;
+        
+            // 表示上のマウスクリック位置を取得
+            const mouseX = e.clientX - rect.left;
+            const mouseY = e.clientY - rect.top;
+        
+            // 比率を掛けて、内部座標に変換
+            const x = mouseX * scaleX;
+            const y = mouseY * scaleY;
+        
             allFronts[allFronts.length - 1].push({ x, y, type: currentFrontType });
             flashPoint(x, y);
         });
@@ -426,5 +438,3 @@
     </script>
 </body>
 </html>
-
-
