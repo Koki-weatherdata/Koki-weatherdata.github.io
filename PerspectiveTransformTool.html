@@ -1,0 +1,882 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Perspective Transform Tool</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+
+    :root {
+      --btn-radius: 10px;
+      --btn-shadow: 0 6px 14px rgba(0,0,0,0.12), 0 3px 6px rgba(0,0,0,0.08);
+      --btn-shadow-inset: inset 0 1px 0 rgba(255,255,255,0.15);
+    }
+
+    body { font-family: 'Inter', system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: .5rem;
+      border: 0;
+      padding: 10px 14px;
+      font-weight: 700;
+      border-radius: var(--btn-radius);
+      box-shadow: var(--btn-shadow), var(--btn-shadow-inset);
+      cursor: pointer;
+      transition: transform .05s ease, filter .2s ease;
+      user-select: none;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .btn:active { transform: translateY(1px); }
+
+    .btn-green {
+      color: #fff;
+      background: linear-gradient(180deg,#22c55e,#16a34a);
+    }
+    .btn-green:hover { filter: brightness(1.05); }
+    .btn-green:disabled { background: #93c5aa; cursor: not-allowed; opacity: 0.6; }
+
+    .btn-blue {
+      color: #fff;
+      background: linear-gradient(180deg,#3b82f6,#2563eb);
+    }
+    .btn-blue:hover { filter: brightness(1.05); }
+
+    .btn-red {
+      color: #fff;
+      background: linear-gradient(180deg,#ef4444,#dc2626);
+    }
+    .btn-red:hover { filter: brightness(1.05); }
+
+    .btn-ghost {
+      color: #111827;
+      background: #e5e7eb;
+      box-shadow: var(--btn-shadow);
+    }
+    .btn-ghost:hover { filter: brightness(1.03); }
+
+    .btn-toggle-active { outline: 2px solid rgba(59,130,246,.55); outline-offset: 2px; }
+
+    .icon { width: 18px; height: 18px; display: inline-block; }
+
+    .handle {
+      width: 16px; height: 16px;
+      background-color: rgba(0,120,255,0.95);
+      border: 3px solid #fff; border-radius: 50%;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.3), 0 0 0 1px rgba(0,0,0,0.1);
+      cursor: grab; position: absolute; z-index: 1000; left: 0; top: 0;
+      touch-action: none; pointer-events: auto; transform: translate(-50%, -50%);
+    }
+    .handle.dragging {
+      cursor: grabbing;
+      background-color: rgba(0,120,255,1);
+      transform: translate(-50%, -50%) scale(1.2);
+      box-shadow: 0 4px 12px rgba(0,0,0,0.4), 0 0 0 2px rgba(0,120,255,0.3);
+    }
+
+    #canvas-container {
+      position: relative; width: 100%; aspect-ratio: 16/9;
+      background-color: #f0f0f0;
+      background-size: 20px 20px;
+      background-image:
+        linear-gradient(to right, #ddd 1px, transparent 1px),
+        linear-gradient(to bottom, #ddd 1px, transparent 1px);
+      overflow: hidden; display: flex; justify-content: center; align-items: center;
+      user-select: none; padding: 8px;
+    }
+    #canvas {
+      position: relative; image-rendering: pixelated; touch-action: none; pointer-events: none;
+      max-width: calc(100% - 16px); max-height: calc(100% - 16px);
+    }
+
+    #upload-box.dragging { border-color: #3b82f6; background-color: #eff6ff; }
+    .cursor-move-all { cursor: move; }
+  </style>
+</head>
+<body class="bg-gray-100 min-h-screen p-4 flex items-center justify-center">
+  <div class="container mx-auto max-w-5xl bg-white rounded-2xl shadow-xl">
+    <div class="p-6 md:p-10">
+      <h1 class="text-3xl font-bold text-center text-gray-800 mb-6">遠近法変換ツール</h1>
+
+      <!-- Upload Area -->
+      <div id="upload-box" class="border-4 border-dashed border-gray-300 rounded-lg p-8 text-center cursor-pointer hover:border-blue-500 hover:bg-gray-50 transition-colors">
+        <svg class="mx-auto h-12 w-12 text-gray-400" stroke="currentColor" fill="none" viewBox="0 0 48 48" aria-hidden="true">
+          <path d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <p class="mt-4 text-lg text-gray-600">画像をここにドラッグ＆ドロップ</p>
+        <p class="text-gray-500 text-sm my-2">または</p>
+        <input type="file" id="file-input" class="hidden" accept="image/*">
+        <label for="file-input" class="btn btn-blue">
+          <svg class="icon" viewBox="0 0 24 24" fill="none"><path d="M12 16V4m0 12l-3.5-3.5M12 16l3.5-3.5M4 20h16" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          画像を選択
+        </label>
+        <p id="loading-text" class="hidden mt-4 text-blue-600 animate-pulse">画像を読み込み中...</p>
+      </div>
+
+      <!-- Main Content -->
+      <div id="main-content" class="hidden mt-8">
+        <div class="w-full max-w-3xl mx-auto">
+          <div class="border rounded-lg shadow-md overflow-hidden">
+            <h2 class="text-xl font-semibold text-gray-700 p-4 bg-gray-50 border-b">
+              四隅ハンドルで変形／内側ドラッグで全体移動
+            </h2>
+            <div class="p-4 flex justify-center items-center">
+              <div id="canvas-container" aria-label="編集キャンバス">
+                <canvas id="canvas"></canvas>
+              </div>
+            </div>
+
+            <!-- Control Panel -->
+            <div class="px-4 pb-4">
+              <div class="flex flex-wrap gap-2 items-center justify-center">
+                <button id="snap-btn" class="btn btn-ghost" aria-pressed="false" title="背景方眼の交点にスナップ"> 
+                  <svg class="icon" viewBox="0 0 24 24" fill="none"><path d="M4 4h16M4 12h16M4 20h16M4 4v16M12 4v16M20 4v16" stroke="currentColor" stroke-width="1.5" opacity=".7"/></svg>
+                  スナップ: OFF
+                </button>
+                <button id="copy-url-btn" class="btn btn-blue" title="現在の編集設定をURLに反映してコピー">
+                  <svg class="icon" viewBox="0 0 24 24" fill="none"><path d="M8 17l-3 3m0 0l-3-3m3 3V7a5 5 0 015-5h4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M16 7h3a2 2 0 012 2v11a2 2 0 01-2 2H10a2 2 0 01-2-2v-3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                  設定URLをコピー
+                </button>
+                <button id="clear-url-btn" class="btn btn-ghost" title="URLのクエリ（設定）を消去">
+                  <svg class="icon" viewBox="0 0 24 24" fill="none"><path d="M3 7h18M6 7v10a2 2 0 002 2h8a2 2 0 002-2V7M9 7V5a3 3 0 013-3h0a3 3 0 013 3v2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                  URLを消去
+                </button>
+
+                <!-- Download quality toggle -->
+                <button id="download-quality-btn" class="btn btn-ghost" aria-pressed="false" title="ダウンロードの解像度を切り替え">
+                  <svg class="icon" viewBox="0 0 24 24" fill="none">
+                    <path d="M4 7h16M4 12h10M4 17h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                  </svg>
+                  DL解像度: プレビュー
+                </button>
+
+                <button id="clear-btn" class="btn btn-red" title="画像と編集状態をクリア">
+                  <svg class="icon" viewBox="0 0 24 24" fill="none"><path d="M6 18L18 6M6 6l12 12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                  画像を消去
+                </button>
+                <button id="download-btn" class="btn btn-green" title="変換後の画像をダウンロード" disabled>
+                  <svg class="icon" viewBox="0 0 24 24" fill="none"><path d="M12 3v12m0 0l-4-4m4 4l4-4M5 21h14" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                  変換した画像をダウンロード
+                </button>
+              </div>
+              <p id="status-text" class="text-gray-500 text-center mt-3 text-sm"></p>
+              <p id="processing-text" class="hidden mt-2 text-blue-600 animate-pulse text-center">画像を高画質で処理中...</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    // ===== 定数 =====
+    const HANDLE_HIT_RADIUS = 30;
+    const MAX_PREVIEW_SIZE = 1200;
+    const INTERACTIVE_STEP_BASE_LOW = 5;
+    const INTERACTIVE_STEP_BASE_HIGH = 3;
+
+    // ===== 状態 =====
+    const state = {
+      originalImage: null,
+      srcCanvasPreview: null, srcCtxPreview: null,
+      previewScale: 1,
+      handles: [
+        { x: 0.0, y: 0.0 },
+        { x: 1.0, y: 0.0 },
+        { x: 1.0, y: 1.0 },
+        { x: 0.0, y: 1.0 }
+      ],
+      draggingHandle: -1,
+      draggingMode: null,
+      canvasOffset: { x: 0, y: 0 },
+      snapEnabled: false,
+      gridSize: 20,
+      moveStartPointer: null,
+      moveStartHandles: null,
+      pendingHandlesNormalized: null,
+      pendingSnap: null,
+      pendingGrid: null,
+      pendingDlQuality: null, // 'preview' | 'full' | null
+      warpRequestId: null,
+      lastPointer: { x: 0, y: 0, t: 0 },
+      velocity: 0,
+      downloadQuality: 'preview' // 'preview' | 'full'
+    };
+
+    // ===== DOM =====
+    const dom = {
+      canvasContainer: document.getElementById('canvas-container'),
+      canvas: document.getElementById('canvas'),
+      ctx: document.getElementById('canvas').getContext('2d', { willReadFrequently: true, alpha: true }),
+      uploadBox: document.getElementById('upload-box'),
+      fileInput: document.getElementById('file-input'),
+      loadingText: document.getElementById('loading-text'),
+      mainContent: document.getElementById('main-content'),
+      downloadBtn: document.getElementById('download-btn'),
+      processingText: document.getElementById('processing-text'),
+      statusText: document.getElementById('status-text'),
+      snapBtn: document.getElementById('snap-btn'),
+      copyUrlBtn: document.getElementById('copy-url-btn'),
+      clearBtn: document.getElementById('clear-btn'),
+      clearUrlBtn: document.getElementById('clear-url-btn'),
+      downloadQualityBtn: document.getElementById('download-quality-btn'),
+      handleElements: []
+    };
+
+    const sliceCanvases = { horizontal: null, vertical: null };
+
+    // ===== Utils =====
+    const utils = {
+      clamp: (v, min, max) => Math.min(max, Math.max(min, v)),
+      clamp01: (v) => utils.clamp(v, 0, 1),
+      relativeToDisplayPixel: (relPos) => ({ x: relPos.x * dom.canvas.clientWidth, y: relPos.y * dom.canvas.clientHeight }),
+      displayPixelToRelative: (pxPos) => ({ x: pxPos.x / dom.canvas.clientWidth, y: pxPos.y / dom.canvas.clientHeight }),
+      pointInPolygon: (pt, poly) => {
+        let inside = false;
+        for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+          const xi = poly[i].x, yi = poly[i].y;
+          const xj = poly[j].x, yj = poly[j].y;
+          const intersect = ((yi > pt.y) !== (yj > pt.y)) &&
+            (pt.x < (xj - xi) * (pt.y - yi) / ((yj - yi) || 1e-9) + xi);
+          if (intersect) inside = !inside;
+        }
+        return inside;
+      },
+      getQuadDisplayPoints: () => state.handles.map(h => utils.relativeToDisplayPixel(h)),
+      orderPointsTLTRBRBL: (pts) => {
+        const arr = pts.map(p => ({ x: p.x, y: p.y }));
+        arr.sort((a, b) => (a.y - b.y) || (a.x - b.x));
+        const top = arr.slice(0, 2).sort((a, b) => a.x - b.x);
+        const bottom = arr.slice(2).sort((a, b) => a.x - b.x);
+        return [
+          [top[0].x, top[0].y],
+          [top[1].x, top[1].y],
+          [bottom[1].x, bottom[1].y],
+          [bottom[0].x, bottom[0].y]
+        ];
+      }
+    };
+
+    // ===== UI =====
+    const ui = {
+      setStatus: (msg, isError = false) => {
+        dom.statusText.textContent = msg || '';
+        dom.statusText.classList.toggle('text-red-600', !!isError);
+        dom.statusText.classList.toggle('text-gray-500', !isError);
+      },
+      updateSnapButtonUI: () => {
+        dom.snapBtn.setAttribute('aria-pressed', state.snapEnabled ? 'true' : 'false');
+        dom.snapBtn.innerHTML = `<svg class="icon" viewBox="0 0 24 24" fill="none"><path d="M4 4h16M4 12h16M4 20h16M4 4v16M12 4v16M20 4v16" stroke="currentColor" stroke-width="1.5" opacity=".7"/></svg> スナップ: ${state.snapEnabled ? 'ON' : 'OFF'}`;
+        dom.snapBtn.classList.toggle('btn-toggle-active', state.snapEnabled);
+      },
+      updateDownloadQualityBtn: () => {
+        const isFull = state.downloadQuality === 'full';
+        dom.downloadQualityBtn.setAttribute('aria-pressed', isFull ? 'true' : 'false');
+        dom.downloadQualityBtn.classList.toggle('btn-toggle-active', isFull);
+        dom.downloadQualityBtn.innerHTML = `
+          <svg class="icon" viewBox="0 0 24 24" fill="none">
+            <path d="M4 7h16M4 12h10M4 17h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          </svg>
+          DL解像度: ${isFull ? '元画像' : 'プレビュー'}
+        `;
+      },
+      showLoading: (show) => dom.loadingText.classList.toggle('hidden', !show),
+      showProcessing: (show) => dom.processingText.classList.toggle('hidden', !show)
+    };
+
+    // ===== Canvas管理 =====
+    const canvasManager = {
+      setupSourceCanvases: () => {
+        const img = state.originalImage;
+        const scale = Math.min(1, MAX_PREVIEW_SIZE / Math.max(img.width, img.height));
+        state.previewScale = scale;
+
+        if (!state.srcCanvasPreview) {
+          state.srcCanvasPreview = document.createElement('canvas');
+          state.srcCtxPreview = state.srcCanvasPreview.getContext('2d', { willReadFrequently: true, alpha: true });
+        }
+        state.srcCanvasPreview.width = Math.max(1, Math.round(img.width * scale));
+        state.srcCanvasPreview.height = Math.max(1, Math.round(img.height * scale));
+        state.srcCtxPreview.setTransform(1,0,0,1,0,0);
+        state.srcCtxPreview.clearRect(0, 0, state.srcCanvasPreview.width, state.srcCanvasPreview.height);
+        state.srcCtxPreview.imageSmoothingEnabled = true;
+        state.srcCtxPreview.imageSmoothingQuality = 'high';
+        state.srcCtxPreview.drawImage(img, 0, 0, state.srcCanvasPreview.width, state.srcCanvasPreview.height);
+      },
+      getSliceCanvas: (isHorizontal, ow, oh, coverStep) => {
+        const key = isHorizontal ? 'horizontal' : 'vertical';
+        if (!sliceCanvases[key]) {
+          sliceCanvases[key] = { canvas: document.createElement('canvas'), ctx: null };
+          sliceCanvases[key].ctx = sliceCanvases[key].canvas.getContext('2d', { alpha: true });
+        }
+        const slice = sliceCanvases[key];
+        const newW = isHorizontal ? ow : coverStep;
+        const newH = isHorizontal ? coverStep : oh;
+        if (slice.canvas.width !== newW || slice.canvas.height !== newH) {
+          slice.canvas.width = newW;
+          slice.canvas.height = newH;
+        }
+        return slice;
+      }
+    };
+
+    // ===== 変換処理 =====
+    const transform = {
+      drawPerspective: (ctxd, srcCanvas, ow, oh, points, step = 1) => {
+        const [d0, d1, d2, d3] = points;
+        const dims = [
+          Math.hypot(d0[0] - d1[0], d0[1] - d1[1]),
+          Math.hypot(d1[0] - d2[0], d1[1] - d2[1]),
+          Math.hypot(d2[0] - d3[0], d2[1] - d3[1]),
+          Math.hypot(d3[0] - d0[0], d3[1] - d0[1])
+        ];
+        let baseIndex = 0, maxRate = 0, zeroNum = 0;
+        for (let i = 0; i < 4; i++) {
+          const rate = (i % 2) ? (dims[i] / oh) : (dims[i] / ow);
+          if (rate > maxRate) { baseIndex = i; maxRate = rate; }
+          if (dims[i] === 0) zeroNum++;
+        }
+        if (zeroNum > 1) { ctxd.clearRect(0, 0, ctxd.canvas.width, ctxd.canvas.height); return; }
+
+        const coverStep = step * 5;
+        const isHorizontal = baseIndex % 2 === 0;
+        const slice = canvasManager.getSliceCanvas(isHorizontal, ow, oh, coverStep);
+
+        ctxd.imageSmoothingEnabled = false;
+        slice.ctx.imageSmoothingEnabled = false;
+
+        ctxd.save();
+        ctxd.setTransform(1, 0, 0, 1, 0, 0);
+        ctxd.clearRect(0, 0, ctxd.canvas.width, ctxd.canvas.height);
+        ctxd.beginPath();
+        ctxd.moveTo(d0[0], d0[1]);
+        ctxd.lineTo(d1[0], d1[1]);
+        ctxd.lineTo(d2[0], d2[1]);
+        ctxd.lineTo(d3[0], d3[1]);
+        ctxd.closePath();
+        ctxd.clip();
+
+        if (isHorizontal) {
+          for (let y = 0; y < oh; y += step) {
+            const r = y / oh;
+            const sx = d0[0] + (d3[0] - d0[0]) * r;
+            const sy = d0[1] + (d3[1] - d0[1]) * r;
+            const ex = d1[0] + (d2[0] - d1[0]) * r;
+            const ey = d1[1] + (d2[1] - d1[1]) * r;
+
+            const dx = ex - sx, dy = ey - sy;
+            if (dx === 0 && dy === 0) continue;
+
+            const sliceH = Math.min(coverStep, oh - y);
+            slice.ctx.clearRect(0, 0, slice.canvas.width, slice.canvas.height);
+            slice.ctx.drawImage(srcCanvas, 0, y, ow, sliceH, 0, 0, ow, sliceH);
+
+            ctxd.setTransform(1, 0, 0, 1, 0, 0);
+            ctxd.translate(sx, sy);
+            ctxd.rotate(Math.atan2(dy, dx));
+            const sc = Math.hypot(dx, dy) / ow;
+            ctxd.scale(sc, sc);
+            ctxd.drawImage(slice.canvas, 0, 0);
+          }
+        } else {
+          for (let x = 0; x < ow; x += step) {
+            const r = x / ow;
+            const sx = d0[0] + (d1[0] - d0[0]) * r;
+            const sy = d0[1] + (d1[1] - d0[1]) * r;
+            const ex = d3[0] + (d2[0] - d3[0]) * r;
+            const ey = d3[1] + (d2[1] - d3[1]) * r;
+
+            const dx = ex - sx, dy = ey - sy;
+            if (dx === 0 && dy === 0) continue;
+
+            const sliceW = Math.min(coverStep, ow - x);
+            slice.ctx.clearRect(0, 0, slice.canvas.width, slice.canvas.height);
+            slice.ctx.drawImage(srcCanvas, x, 0, sliceW, oh, 0, 0, sliceW, oh);
+
+            ctxd.setTransform(1, 0, 0, 1, 0, 0);
+            ctxd.translate(sx, sy);
+            ctxd.rotate(Math.atan2(sx - ex, ey - sy));
+            const sc = Math.hypot(dx, dy) / oh;
+            ctxd.scale(sc, sc);
+            ctxd.drawImage(slice.canvas, 0, 0);
+          }
+        }
+        ctxd.restore();
+      },
+
+      applyTransform: (step = 1) => {
+        if (!state.srcCanvasPreview) return;
+        const w = dom.canvas.width, h = dom.canvas.height;
+        const rawPoints = state.handles.map(p => ({ x: p.x * w, y: p.y * h }));
+        const points = utils.orderPointsTLTRBRBL(rawPoints);
+        const srcCanvas = state.srcCanvasPreview; // 編集は常にプレビュー
+        transform.drawPerspective(dom.ctx, srcCanvas, srcCanvas.width, srcCanvas.height, points, step);
+      },
+
+      dynamicStep: () => {
+        const base = (state.previewScale < 0.9) ? INTERACTIVE_STEP_BASE_LOW : INTERACTIVE_STEP_BASE_HIGH;
+        if (state.velocity > 1.2) return base + 3;
+        if (state.velocity > 0.7) return base + 2;
+        if (state.velocity > 0.35) return base + 1;
+        return base;
+      },
+
+      previewNow: () => {
+        const step = transform.dynamicStep();
+        transform.applyTransform(step);
+      },
+
+      requestWarp: () => {
+        const step = transform.dynamicStep();
+        if (state.warpRequestId) cancelAnimationFrame(state.warpRequestId);
+        state.warpRequestId = requestAnimationFrame(() => {
+          transform.applyTransform(step);
+          handles.updatePositions();
+        });
+      }
+    };
+
+    // ===== ハンドル =====
+    const handles = {
+      create: () => {
+        for (let i = 0; i < 4; i++) {
+          const h = document.createElement('div');
+          h.className = 'handle';
+          h.style.visibility = 'hidden';
+          h.dataset.index = i;
+          dom.canvasContainer.appendChild(h);
+          dom.handleElements.push(h);
+        }
+      },
+      updatePositions: () => {
+        for (let i = 0; i < 4; i++) {
+          const p = utils.relativeToDisplayPixel(state.handles[i]);
+          const hx = state.canvasOffset.x + p.x;
+          const hy = state.canvasOffset.y + p.y;
+          dom.handleElements[i].style.left = `${hx}px`;
+          dom.handleElements[i].style.top = `${hy}px`;
+          dom.handleElements[i].style.transform = 'translate(-50%, -50%)';
+        }
+      },
+      reset: () => {
+        state.handles = [
+          { x: 0.0, y: 0.0 },
+          { x: 1.0, y: 0.0 },
+          { x: 1.0, y: 1.0 },
+          { x: 0.0, y: 1.0 }
+        ];
+      }
+    };
+
+    // ===== イベント =====
+    const events = {
+      getCoords: (e) => ({ x: e.touches?.[0]?.clientX ?? e.clientX, y: e.touches?.[0]?.clientY ?? e.clientY }),
+
+      onPointerDown: (e) => {
+        if (!state.originalImage) return;
+        const { x, y } = events.getCoords(e);
+        const rect = dom.canvas.getBoundingClientRect();
+        const mouseX = x - rect.left;
+        const mouseY = y - rect.top;
+
+        state.lastPointer = { x: mouseX, y: mouseY, t: performance.now() };
+        state.velocity = 0;
+
+        // ハンドル判定
+        state.draggingHandle = -1;
+        let minD = Infinity;
+        for (let i = 0; i < 4; i++) {
+          const p = utils.relativeToDisplayPixel(state.handles[i]);
+          const d = Math.hypot(p.x - mouseX, p.y - mouseY);
+          if (d < HANDLE_HIT_RADIUS && d < minD) { minD = d; state.draggingHandle = i; }
+        }
+        if (state.draggingHandle !== -1) {
+          e.preventDefault();
+          dom.handleElements[state.draggingHandle].classList.add('dragging');
+          state.draggingMode = null;
+          return;
+        }
+
+        // 全体移動判定
+        const quad = utils.getQuadDisplayPoints();
+        if (utils.pointInPolygon({ x: mouseX, y: mouseY }, quad)) {
+          e.preventDefault();
+          state.draggingMode = 'move';
+          state.moveStartPointer = { x: mouseX, y: mouseY };
+          state.moveStartHandles = state.handles.map(h => ({ ...h }));
+          dom.canvasContainer.classList.add('cursor-move-all');
+        }
+      },
+
+      onPointerMove: (e) => {
+        if (!state.originalImage || (state.draggingHandle === -1 && state.draggingMode !== 'move')) return;
+        e.preventDefault();
+
+        const { x, y } = events.getCoords(e);
+        const rect = dom.canvas.getBoundingClientRect();
+        let mouseX = utils.clamp(x - rect.left, 0, rect.width);
+        let mouseY = utils.clamp(y - rect.top, 0, rect.height);
+
+        const now = performance.now();
+        const dt = Math.max(0.5, now - state.lastPointer.t);
+        const dxv = mouseX - state.lastPointer.x;
+        const dyv = mouseY - state.lastPointer.y;
+        state.velocity = 0.7 * state.velocity + 0.3 * (Math.hypot(dxv, dyv) / dt);
+        state.lastPointer = { x: mouseX, y: mouseY, t: now };
+
+        if (state.draggingHandle !== -1) {
+          if (state.snapEnabled) {
+            const snapped = snap.toGrid(mouseX, mouseY);
+            mouseX = snapped.x; mouseY = snapped.y;
+          }
+          state.handles[state.draggingHandle] = utils.displayPixelToRelative({ x: mouseX, y: mouseY });
+
+          // ハンドルDOM即時反映
+          const hx = state.canvasOffset.x + mouseX;
+          const hy = state.canvasOffset.y + mouseY;
+          const el = dom.handleElements[state.draggingHandle];
+          el.style.left = `${hx}px`;
+          el.style.top = `${hy}px`;
+          el.style.transform = 'translate(-50%, -50%)';
+
+          transform.previewNow();
+
+        } else if (state.draggingMode === 'move') {
+          let dx = mouseX - state.moveStartPointer.x;
+          let dy = mouseY - state.moveStartPointer.y;
+
+          if (state.snapEnabled) {
+            const startC = snap.displayToContainer(state.moveStartPointer.x, state.moveStartPointer.y);
+            const currC = snap.displayToContainer(mouseX, mouseY);
+            const startSnap = snap.pointToGrid(startC);
+            const currSnap = snap.pointToGrid(currC);
+            dx = currSnap.x - startSnap.x;
+            dy = currSnap.y - startSnap.y;
+          }
+
+          let dxRel = dx / dom.canvas.clientWidth;
+          let dyRel = dy / dom.canvas.clientHeight;
+
+          const xs = state.moveStartHandles.map(h => h.x);
+          const ys = state.moveStartHandles.map(h => h.y);
+          dxRel = utils.clamp(dxRel, -Math.min(...xs), 1 - Math.max(...xs));
+          dyRel = utils.clamp(dyRel, -Math.min(...ys), 1 - Math.max(...ys));
+
+          state.handles = state.moveStartHandles.map(h => ({ x: h.x + dxRel, y: h.y + dyRel }));
+          handles.updatePositions();
+          transform.previewNow();
+        }
+      },
+
+      onPointerUp: () => {
+        if (state.draggingHandle !== -1) {
+          dom.handleElements[state.draggingHandle].classList.remove('dragging');
+          state.draggingHandle = -1;
+        }
+        if (state.draggingMode === 'move') {
+          state.draggingMode = null;
+          state.moveStartPointer = null;
+          state.moveStartHandles = null;
+          dom.canvasContainer.classList.remove('cursor-move-all');
+        }
+        transform.requestWarp();
+        dom.downloadBtn.disabled = false;
+      },
+
+      onResize: () => {
+        if (!state.originalImage) return;
+        dom.canvasContainer.style.aspectRatio = `${state.originalImage.width} / ${state.originalImage.height}`;
+        dom.canvas.width = state.originalImage.width;
+        dom.canvas.height = state.originalImage.height;
+        dom.canvas.style.width = '100%';
+        dom.canvas.style.height = '100%';
+
+        const containerRect = dom.canvasContainer.getBoundingClientRect();
+        const canvasRect = dom.canvas.getBoundingClientRect();
+        state.canvasOffset.x = canvasRect.left - containerRect.left;
+        state.canvasOffset.y = canvasRect.top - containerRect.top;
+
+        dom.handleElements.forEach(h => h.style.visibility = 'visible');
+        handles.updatePositions();
+        transform.requestWarp();
+      }
+    };
+
+    // ===== スナップ =====
+    const snap = {
+      toggle: () => { state.snapEnabled = !state.snapEnabled; ui.updateSnapButtonUI(); ui.setStatus(`スナップ: ${state.snapEnabled ? 'ON' : 'OFF'}`); },
+      toGrid: (mouseX, mouseY) => {
+        const cont = snap.displayToContainer(mouseX, mouseY);
+        const snapped = snap.pointToGrid(cont);
+        const disp = snap.containerToDisplay(snapped.x, snapped.y);
+        return { x: utils.clamp(disp.x, 0, dom.canvas.clientWidth), y: utils.clamp(disp.y, 0, dom.canvas.clientHeight) };
+      },
+      pointToGrid: (pt) => ({ x: Math.round(pt.x / state.gridSize) * state.gridSize, y: Math.round(pt.y / state.gridSize) * state.gridSize }),
+      displayToContainer: (dx, dy) => ({ x: state.canvasOffset.x + dx, y: state.canvasOffset.y + dy }),
+      containerToDisplay: (cx, cy) => ({ x: cx - state.canvasOffset.x, y: cy - state.canvasOffset.y })
+    };
+
+    // ===== URL管理 =====
+    const urlManager = {
+      parse: () => {
+        state.pendingHandlesNormalized = null;
+        state.pendingSnap = null;
+        state.pendingGrid = null;
+        state.pendingDlQuality = null;
+
+        const params = new URLSearchParams(location.search);
+        const h = params.get('h');
+        if (h) {
+          const parts = h.split(',').map(parseFloat).filter(Number.isFinite);
+          if (parts.length === 8) state.pendingHandlesNormalized = parts.map(utils.clamp01);
+        }
+        const snapParam = params.get('snap');
+        if (snapParam === '1' || snapParam === '0') state.pendingSnap = snapParam === '1';
+        const grid = parseInt(params.get('grid') || '', 10);
+        if (Number.isFinite(grid)) state.pendingGrid = grid;
+
+        const dl = (params.get('dl') || '').toLowerCase();
+        if (dl === 'preview' || dl === 'full') state.pendingDlQuality = dl;
+      },
+      build: () => {
+        const params = new URLSearchParams();
+        const arr = [
+          state.handles[0].x, state.handles[0].y,
+          state.handles[1].x, state.handles[1].y,
+          state.handles[2].x, state.handles[2].y,
+          state.handles[3].x, state.handles[3].y
+        ].map(v => Math.round(v * 10000) / 10000);
+        params.set('h', arr.join(','));
+        params.set('snap', state.snapEnabled ? '1' : '0');
+        params.set('grid', String(state.gridSize));
+        params.set('dl', state.downloadQuality === 'full' ? 'full' : 'preview');
+        return params;
+      },
+      copy: () => {
+        const params = urlManager.build();
+        const url = new URL(location.href);
+        url.search = params.toString();
+        history.replaceState(null, '', url.toString());
+        urlManager.parse();
+        navigator.clipboard.writeText(url.toString())
+          .then(() => ui.setStatus('現在の編集設定を含むURLをコピーしました。'))
+          .catch(() => ui.setStatus('URLのコピーに失敗しました。', true));
+      },
+      clear: () => {
+        const url = new URL(location.href);
+        url.search = '';
+        history.replaceState(null, '', url.toString());
+        state.pendingHandlesNormalized = null;
+        state.pendingSnap = null;
+        state.pendingGrid = null;
+        state.pendingDlQuality = null;
+        ui.setStatus('URLのクエリ（設定）を消去しました。');
+      }
+    };
+
+    // ===== 画像管理 =====
+    const imageManager = {
+      load: (file) => {
+        urlManager.parse();
+        // dl の保留値をUIに反映
+        if (state.pendingDlQuality) {
+          state.downloadQuality = state.pendingDlQuality;
+          ui.updateDownloadQualityBtn();
+        }
+
+        if (!file.type?.startsWith('image/')) { ui.setStatus('画像ファイルではありません。', true); return; }
+        ui.showLoading(true);
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          const img = new Image();
+          img.onload = () => {
+            try {
+              state.originalImage = img;
+              dom.uploadBox.classList.add('hidden');
+              dom.mainContent.classList.remove('hidden');
+              ui.showLoading(false);
+              dom.downloadBtn.disabled = true;
+
+              canvasManager.setupSourceCanvases();
+
+              if (state.pendingHandlesNormalized?.length === 8) {
+                state.handles = [
+                  { x: utils.clamp01(state.pendingHandlesNormalized[0]), y: utils.clamp01(state.pendingHandlesNormalized[1]) },
+                  { x: utils.clamp01(state.pendingHandlesNormalized[2]), y: utils.clamp01(state.pendingHandlesNormalized[3]) },
+                  { x: utils.clamp01(state.pendingHandlesNormalized[4]), y: utils.clamp01(state.pendingHandlesNormalized[5]) },
+                  { x: utils.clamp01(state.pendingHandlesNormalized[6]), y: utils.clamp01(state.pendingHandlesNormalized[7]) }
+                ];
+              } else { handles.reset(); }
+
+              if (typeof state.pendingSnap === 'boolean') { state.snapEnabled = state.pendingSnap; ui.updateSnapButtonUI(); }
+              if (state.pendingGrid && Number.isFinite(state.pendingGrid)) {
+                state.gridSize = utils.clamp(state.pendingGrid | 0, 5, 200);
+                dom.canvasContainer.style.backgroundSize = `${state.gridSize}px ${state.gridSize}px`;
+              }
+
+              events.onResize();
+              requestAnimationFrame(() => transform.requestWarp());
+              ui.setStatus(`画像を読み込みました: ${img.width}x${img.height}px`);
+            } catch (err) {
+              console.error(err);
+              ui.setStatus('読み込みエラーが発生しました。', true);
+              ui.showLoading(false);
+            }
+          };
+          img.onerror = () => { ui.setStatus('画像の読み込みに失敗しました。', true); ui.showLoading(false); };
+          img.src = e.target.result;
+        };
+        reader.readAsDataURL(file);
+      },
+
+      clear: () => {
+        state.originalImage = null;
+        dom.ctx.clearRect(0, 0, dom.canvas.width, dom.canvas.height);
+        state.srcCanvasPreview?.getContext?.('2d')?.clearRect(0, 0, state.srcCanvasPreview.width, state.srcCanvasPreview.height);
+        handles.reset();
+        dom.mainContent.classList.add('hidden');
+        dom.uploadBox.classList.remove('hidden');
+        dom.handleElements.forEach(h => h.style.visibility = 'hidden');
+        dom.downloadBtn.disabled = true;
+        ui.setStatus('画像を消去しました。別の画像を読み込んでください。');
+      },
+
+      buildFullSourceCanvas: () => {
+        const img = state.originalImage;
+        const c = document.createElement('canvas');
+        c.width = img.width; c.height = img.height;
+        const cctx = c.getContext('2d', { alpha: true });
+        cctx.drawImage(img, 0, 0);
+        return c;
+      },
+
+      download: () => {
+        if (!state.originalImage || !state.srcCanvasPreview) {
+          ui.setStatus('ダウンロードできる画像がありません。', true);
+          return;
+        }
+
+        const quality = state.downloadQuality; // 'preview' or 'full'
+        if (quality === 'preview') {
+          const finalCanvas = document.createElement('canvas');
+          finalCanvas.width = state.srcCanvasPreview.width;
+          finalCanvas.height = state.srcCanvasPreview.height;
+          const finalCtx = finalCanvas.getContext('2d', { alpha: true });
+
+          const ow = finalCanvas.width, oh = finalCanvas.height;
+          const ordered = utils.orderPointsTLTRBRBL(state.handles.map(p => ({ x: p.x * ow, y: p.y * oh })));
+          transform.drawPerspective(finalCtx, state.srcCanvasPreview, ow, oh, ordered, 1);
+
+          finalCanvas.toBlob((blob) => {
+            if (!blob) { ui.setStatus('画像の生成に失敗しました。', true); return; }
+            const link = document.createElement('a');
+            const url = URL.createObjectURL(blob);
+            link.href = url;
+            link.download = `transformed_preview_${Date.now()}.png`;
+            document.body.appendChild(link);
+            link.click();
+            setTimeout(() => { URL.revokeObjectURL(url); document.body.removeChild(link); }, 100);
+            ui.setStatus('プレビュー解像度でPNGを書き出しました。');
+          }, 'image/png', 0.92);
+
+        } else {
+          ui.showProcessing(true);
+          dom.downloadBtn.disabled = true;
+
+          setTimeout(() => {
+            try {
+              const srcFull = imageManager.buildFullSourceCanvas();
+              const ow = srcFull.width, oh = srcFull.height;
+
+              const finalCanvas = document.createElement('canvas');
+              finalCanvas.width = ow;
+              finalCanvas.height = oh;
+              const finalCtx = finalCanvas.getContext('2d', { alpha: true });
+
+              const ordered = utils.orderPointsTLTRBRBL(state.handles.map(p => ({ x: p.x * ow, y: p.y * oh })));
+              transform.drawPerspective(finalCtx, srcFull, ow, oh, ordered, 1);
+
+              finalCanvas.toBlob((blob) => {
+                ui.showProcessing(false);
+                dom.downloadBtn.disabled = false;
+
+                if (!blob) { ui.setStatus('画像の生成に失敗しました。', true); return; }
+                const link = document.createElement('a');
+                const url = URL.createObjectURL(blob);
+                link.href = url;
+                link.download = `transformed_full_${Date.now()}.png`;
+                document.body.appendChild(link);
+                link.click();
+                setTimeout(() => { URL.revokeObjectURL(url); document.body.removeChild(link); }, 200);
+                ui.setStatus('元画像解像度でPNGを書き出しました。');
+              }, 'image/png', 0.94);
+            } catch (error) {
+              console.error(error);
+              ui.showProcessing(false);
+              dom.downloadBtn.disabled = false;
+              ui.setStatus('フル解像度の書き出し中にエラーが発生しました。', true);
+            }
+          }, 30);
+        }
+      }
+    };
+
+    // ===== アップロード設定 =====
+    const setupUpload = () => {
+      dom.uploadBox.addEventListener('click', () => dom.fileInput.click());
+      dom.fileInput.addEventListener('change', (e) => { if (e.target.files?.[0]) imageManager.load(e.target.files[0]); });
+      ['dragenter','dragover','dragleave','drop'].forEach(evt => {
+        dom.uploadBox.addEventListener(evt, e => { e.preventDefault(); e.stopPropagation(); }, false);
+      });
+      ['dragenter','dragover'].forEach(evt => { dom.uploadBox.addEventListener(evt, () => dom.uploadBox.classList.add('dragging'), false); });
+      ['dragleave','drop'].forEach(evt => { dom.uploadBox.addEventListener(evt, () => dom.uploadBox.classList.remove('dragging'), false); });
+      dom.uploadBox.addEventListener('drop', (e) => { if (e.dataTransfer.files?.[0]) imageManager.load(e.dataTransfer.files[0]); }, false);
+    };
+
+    // ===== イベントリスナー =====
+    const setupListeners = () => {
+      dom.canvasContainer.addEventListener('mousedown', events.onPointerDown);
+      window.addEventListener('mousemove', events.onPointerMove);
+      window.addEventListener('mouseup', events.onPointerUp);
+      dom.canvasContainer.addEventListener('touchstart', events.onPointerDown, { passive: false });
+      window.addEventListener('touchmove', events.onPointerMove, { passive: false });
+      window.addEventListener('touchend', events.onPointerUp);
+      window.addEventListener('touchcancel', events.onPointerUp);
+
+      new ResizeObserver(events.onResize).observe(dom.canvasContainer);
+
+      dom.snapBtn.addEventListener('click', () => { snap.toggle(); });
+      dom.copyUrlBtn.addEventListener('click', () => { urlManager.copy(); });
+      dom.clearUrlBtn.addEventListener('click', () => { urlManager.clear(); });
+      dom.clearBtn.addEventListener('click', () => { imageManager.clear(); });
+      dom.downloadBtn.addEventListener('click', () => { imageManager.download(); });
+
+      // Download quality toggle
+      dom.downloadQualityBtn.addEventListener('click', () => {
+        state.downloadQuality = (state.downloadQuality === 'preview') ? 'full' : 'preview';
+        ui.updateDownloadQualityBtn();
+        ui.setStatus(`DL解像度を「${state.downloadQuality === 'full' ? '元画像' : 'プレビュー'}」に切り替えました。`);
+      });
+    };
+
+    // ===== 初期化 =====
+    const init = () => {
+      // URLから状態読み取り → UIに反映
+      urlManager.parse();
+      if (state.pendingDlQuality) {
+        state.downloadQuality = state.pendingDlQuality;
+      }
+      ui.updateDownloadQualityBtn();
+
+      setupUpload();
+      setupListeners();
+      handles.create();
+      ui.setStatus('画像を読み込んで編集を開始してください。');
+    };
+    document.addEventListener('DOMContentLoaded', init);
+  </script>
+</body>
+</html>
