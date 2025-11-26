@@ -190,6 +190,13 @@
                 </select>
             </div>
             <div class="control-group">
+                <label>曲線タイプ</label>
+                <select id="curveTypeSelect">
+                    <option value="spline" selected>スプライン曲線（現行）</option>
+                    <option value="bezier">ベジェ曲線</option>
+                </select>
+            </div>
+            <div class="control-group">
                 <label>出力画質</label>
                 <select id="qualitySelect">
                     <option value="1">低画質（Web共有向け / 等倍）</option>
@@ -233,6 +240,7 @@
         const bgUpload = document.getElementById('bgUpload');
         const qualitySelect = document.getElementById('qualitySelect');
         const sizeSelect = document.getElementById('sizeSelect');
+        const curveTypeSelect = document.getElementById('curveTypeSelect');
         const redColorPicker = document.getElementById('redColorPicker');
         const blueColorPicker = document.getElementById('blueColorPicker');
         const purpleColorPicker = document.getElementById('purpleColorPicker');
@@ -249,6 +257,7 @@
         let frontColors = { red: '#FF0000', blue: '#0000FF', purple: '#800080' };
         let sizeMultiplier = 1.0;
         let currentFrontType = 'stationary';
+        let curveType = 'spline';
 
         const BASE_PARAMS = { spacing: 40, size: 9, width: 2.5 };
 
@@ -302,6 +311,7 @@
         blueColorPicker.addEventListener('input', (e) => { frontColors.blue = e.target.value; draw(); });
         purpleColorPicker.addEventListener('input', (e) => { frontColors.purple = e.target.value; draw(); });
         sizeSelect.addEventListener('change', (e) => { sizeMultiplier = parseFloat(e.target.value); draw(); });
+        curveTypeSelect.addEventListener('change', (e) => { curveType = e.target.value; draw(); });
         
         downloadBtn.addEventListener('click', () => {
             const scale = parseFloat(qualitySelect.value);
@@ -329,7 +339,7 @@
 
                 const currentSize = sizeMultiplier;
                 const scaledPoints = userPoints.map(p => ({ x: p.x * scale, y: p.y * scale, type: p.type }));
-                const smoothPath = getSplinePoints(scaledPoints);
+                const smoothPath = curveType === 'bezier' ? getBezierPoints(scaledPoints) : getSplinePoints(scaledPoints);
                 const params = {
                     spacing: BASE_PARAMS.spacing * currentSize * scale,
                     size: BASE_PARAMS.size * currentSize * scale,
@@ -411,6 +421,68 @@
             }
             splinePoints.push(points[points.length-1]);
             return splinePoints;
+        }
+
+        function getBezierPoints(points) {
+            const bezierPoints = [];
+            if (points.length < 2) return [];
+            if (points.length === 2) {
+                // For only 2 points, generate a straight line
+                for (let j = 0; j <= 20; j++) {
+                    const t = j / 20;
+                    const x = (1 - t) * points[0].x + t * points[1].x;
+                    const y = (1 - t) * points[0].y + t * points[1].y;
+                    bezierPoints.push({ x, y });
+                }
+                return bezierPoints;
+            }
+            // For 3+ points, use quadratic Bezier curves
+            // Calculate control points for smooth curve connection
+            for (let i = 0; i < points.length - 1; i++) {
+                const p0 = points[i];
+                const p2 = points[i + 1];
+                let p1; // Control point
+                
+                if (i === 0) {
+                    // First segment: use midpoint shifted towards the next segment's direction
+                    if (points.length > 2) {
+                        const midX = (p0.x + p2.x) / 2;
+                        const midY = (p0.y + p2.y) / 2;
+                        const nextMidX = (p2.x + points[i + 2].x) / 2;
+                        const nextMidY = (p2.y + points[i + 2].y) / 2;
+                        p1 = { x: midX + (p2.x - nextMidX) * 0.25, y: midY + (p2.y - nextMidY) * 0.25 };
+                    } else {
+                        p1 = { x: (p0.x + p2.x) / 2, y: (p0.y + p2.y) / 2 };
+                    }
+                } else if (i === points.length - 2) {
+                    // Last segment: use midpoint shifted based on previous segment
+                    const prevMidX = (points[i - 1].x + p0.x) / 2;
+                    const prevMidY = (points[i - 1].y + p0.y) / 2;
+                    const midX = (p0.x + p2.x) / 2;
+                    const midY = (p0.y + p2.y) / 2;
+                    p1 = { x: midX + (p0.x - prevMidX) * 0.25, y: midY + (p0.y - prevMidY) * 0.25 };
+                } else {
+                    // Middle segments: use the clicked point as control point influence
+                    const prevPoint = points[i - 1];
+                    const nextPoint = points[i + 2];
+                    // Calculate smooth control point based on surrounding points
+                    const tangentX = (p2.x - prevPoint.x) * 0.25;
+                    const tangentY = (p2.y - prevPoint.y) * 0.25;
+                    p1 = { x: p0.x + tangentX, y: p0.y + tangentY };
+                }
+                
+                // Generate points along the quadratic Bezier curve
+                // B(t) = (1-t)²P₀ + 2(1-t)tP₁ + t²P₂
+                for (let j = 0; j < 20; j++) {
+                    const t = j / 20;
+                    const oneMinusT = 1 - t;
+                    const x = oneMinusT * oneMinusT * p0.x + 2 * oneMinusT * t * p1.x + t * t * p2.x;
+                    const y = oneMinusT * oneMinusT * p0.y + 2 * oneMinusT * t * p1.y + t * t * p2.y;
+                    bezierPoints.push({ x, y });
+                }
+            }
+            bezierPoints.push(points[points.length - 1]);
+            return bezierPoints;
         }
 
         function drawSemicircle(x, y, angle, context, params, color) {
