@@ -390,7 +390,7 @@
       selectA.innerHTML = "";
       selectB.innerHTML = "";
 
-      // 過去24時間分（10分刻み = 145コマ）
+      // 過去48時間分（10分刻み = 290コマ）
       for (let i = 0; i < 145; i++) {
         const d = new Date(baseDate.getTime() - i * 10 * 60 * 1000);
         const val = formatDateToUrl(d);
@@ -605,3 +605,4 @@
   </script>
 </body>
 </html>
+
