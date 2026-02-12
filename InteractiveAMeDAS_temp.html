@@ -391,7 +391,7 @@
       selectB.innerHTML = "";
 
       // 過去48時間分（10分刻み = 290コマ）
-      for (let i = 0; i < 145; i++) {
+      for (let i = 0; i < 290; i++) {
         const d = new Date(baseDate.getTime() - i * 10 * 60 * 1000);
         const val = formatDateToUrl(d);
         const label = `${String(d.getDate())}日 ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
@@ -605,4 +605,5 @@
   </script>
 </body>
 </html>
+
 
