@@ -4,22 +4,101 @@
   <meta charset="utf-8">
   <title>アメダス気温観測マップ</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <!-- Leaflet CSS -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
   <style>
+    body { margin: 0; padding: 0; }
     /* 地図表示領域 */
     #map {
       width: 100%;
       height: 100vh;
     }
+    /* コントロールパネル */
+    #control-panel {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      z-index: 1000; /* Leafletの上に表示 */
+      background: rgba(255, 255, 255, 0.9);
+      padding: 10px;
+      border-radius: 5px;
+      box-shadow: 0 0 5px rgba(0,0,0,0.3);
+      font-family: sans-serif;
+      font-size: 14px;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 5px;
+      min-width: 160px;
+    }
+    #time-display {
+      font-weight: bold;
+      color: #333;
+    }
+    #refresh-btn {
+      padding: 5px 10px;
+      cursor: pointer;
+      font-size: 13px;
+      background-color: #0078d4;
+      color: white;
+      border: none;
+      border-radius: 3px;
+    }
+    #refresh-btn:disabled {
+      background-color: #ccc;
+      cursor: not-allowed;
+    }
+    #refresh-btn:hover:not(:disabled) {
+      background-color: #005a9e;
+    }
+
+    /* 差分計算用パネル*/
+    #diff-toggle {
+      font-size: 12px;
+      color: #0078d4;
+      cursor: pointer;
+      text-decoration: underline;
+      margin-top: 5px;
+    }
+    #diff-options {
+      display: none; /* 初期状態は非表示 */
+      flex-direction: column;
+      gap: 5px;
+      margin-top: 8px;
+      padding-top: 8px;
+      border-top: 1px solid #ddd;
+      width: 100%;
+    }
+    #diff-options.active {
+      display: flex;
+    }
+    .diff-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 12px;
+    }
+    select {
+      width: 100%;
+      padding: 2px;
+      margin-top: 2px;
+      font-size: 11px;
+    }
+    #calc-btn {
+      margin-top: 5px;
+      width: 100%;
+      padding: 4px;
+      cursor: pointer;
+      font-size: 12px;
+    }
+
     /* マーカーの基本スタイル */
     .amedas-marker {
       text-align: center;
       font-weight: bold;
     }
-    /* 数字表示用（背景なし） */
+    /* 数字表示用 */
     .amedas-number {
-      font-size: 14px;
+      font-size: 15px;
     }
     /* 丸表示用 */
     .amedas-circle {
@@ -30,21 +109,40 @@
   </style>
 </head>
 <body>
+  <div id="control-panel">
+    <div id="time-display">データ取得中...</div>
+    <button id="refresh-btn" onclick="refreshData()">データ更新</button>
+    
+    <div id="diff-toggle" onclick="toggleDiffPanel()">▼ 気温差を計算</div>
+    <div id="diff-options">
+      <div class="diff-row">
+        <label>時刻 A (基準):</label>
+      </div>
+      <select id="time-select-a"></select>
+      
+      <div class="diff-row" style="margin-top:4px;">
+        <label>時刻 B (比較):</label>
+      </div>
+      <select id="time-select-b"></select>
+      
+      <button id="calc-btn" onclick="calculateDifference()">差分を表示 (A-B)</button>
+      <div id="diff-legend" style="display:none; font-size:10px; margin-top:5px; color:#666; text-align:center;">
+        赤:上昇 / 青:低下
+      </div>
+    </div>
+  </div>
+
   <div id="map"></div>
   
-  <!-- Leaflet JS -->
   <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
-  <!-- Chart.js -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   
   <script>
     /********************
-     * 地図初期化とタイル遅延読み込みの設定
+     * 地図初期化
      ********************/
-    // 地図初期化（日本付近を表示）
     const map = L.map('map').setView([35.6895, 139.6917], 5);
 
-    // タイルレイヤーの追加（updateWhenIdle オプション付き）
     function addTileLayer() {
       L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png', {
         attribution: "<a href='https://maps.gsi.go.jp/development/ichiran.html' target='_blank'>地理院タイル</a>",
@@ -52,13 +150,12 @@
       }).addTo(map);
     }
 
-    // IntersectionObserver を用いて、マップコンテナが画面内に入ったらタイルレイヤーを追加
     if ('IntersectionObserver' in window) {
       const observer = new IntersectionObserver((entries, observer) => {
         entries.forEach(entry => {
           if (entry.isIntersecting) {
             addTileLayer();
-            observer.disconnect(); // 一度読み込んだら監視を終了
+            observer.disconnect();
           }
         });
       }, { threshold: 0.1 });
@@ -67,13 +164,11 @@
       addTileLayer();
     }
 
-    // 表示領域にあるマーカーのみ追加するレイヤーグループ
     const amedasLayerGroup = L.layerGroup().addTo(map);
 
     /********************
      * ヘルパー関数群
      ********************/
-    // デバウンス関数：連続呼び出しをまとめる
     function debounce(func, delay) {
       let timeout;
       return function() {
@@ -85,7 +180,7 @@
       };
     }
 
-    // 気温に合わせた色を返す
+    // 通常時の色
     function getColorForTemperature(temp) {
       if (temp < -5) return "#002080";
       else if (temp < 0) return "#0041ff";
@@ -99,11 +194,35 @@
       else return "#b40068";
     }
 
-    // 数字表示用アイコン（高倍率時用）
-    function getNumberIcon(temp) {
-      const color = getColorForTemperature(temp);
-      const displayTemp = temp.toFixed(1);
-      const shadowColor = (temp >= 5) ? "#000" : "#fff";
+    // 差分表示時の色
+    function getColorForDiff(diff) {
+       if (diff >= 5.0) return "#7f2704"; // 焦げ茶に近いオレンジ
+       if (diff >= 3.0) return "#a63603"; // 濃いオレンジ
+       if (diff >= 1.0) return "#e6550d"; // オレンジ
+       if (diff >= 0.5) return "#fd8d3c"; // 薄いオレンジ
+       if (diff > -0.5) return "#737373"; // ニュートラルグレー
+       if (diff > -1.0) return "#41b6c4"; // ターコイズ
+       if (diff > -3.0) return "#225ea8"; // ブルー
+       if (diff > -5.0) return "#08519c"; // 濃いブルー
+       else return "#08306b"; // 深い紺
+    }
+    // アイコン生成（通常・差分共通ロジック）
+    function getNumberIcon(temp, isDiff = false) {
+      const color = isDiff ? getColorForDiff(temp) : getColorForTemperature(temp);
+      // 差分なら+符号をつける
+      const displayTemp = (isDiff && temp > 0 ? "+" : "") + temp.toFixed(1);
+      
+      // 文字の影色設定（視認性確保）
+      // 通常モード: 元のロジックを完全維持 (5度以上は黒影、未満は白影)
+      // 差分モード: 背景が濃い(絶対値が大きい)場合は白影、薄い(0付近)場合は黒影
+      let shadowColor;
+      if (isDiff) {
+        shadowColor = (Math.abs(temp) >= 0.5) ? "#fff" : "#fff"; 
+        // ※差分0付近はグレー背景にしたので白影でOK、濃い色も白影で見やすい
+      } else {
+        shadowColor = (temp >= 5) ? "#000" : "#fff";
+      }
+
       return L.divIcon({
         className: 'amedas-marker amedas-number',
         html: '<div style="color:' + color + '; text-shadow: -1px -1px 0 ' + shadowColor +
@@ -113,9 +232,8 @@
       });
     }
 
-    // 丸表示用アイコン（低倍率時用）
-    function getCircleIcon(temp) {
-      const color = getColorForTemperature(temp);
+    function getCircleIcon(temp, isDiff = false) {
+      const color = isDiff ? getColorForDiff(temp) : getColorForTemperature(temp);
       return L.divIcon({
         className: 'amedas-marker amedas-circle',
         html: '<div style="width:100%; height:100%; background:' + color +
@@ -125,28 +243,56 @@
       });
     }
 
-    // ズーム閾値：zoom >= zoomThreshold なら数字表示、未満なら丸表示
-    const zoomThreshold = 8;
-    // すべてのマーカーを格納する配列（全観測所）
-    const amedasMarkers = [];
+    function formatTime(date) {
+      const y = date.getFullYear();
+      const m = String(date.getMonth() + 1).padStart(2, '0');
+      const d = String(date.getDate()).padStart(2, '0');
+      const h = String(date.getHours()).padStart(2, '0');
+      const min = String(date.getMinutes()).padStart(2, '0');
+      return `${y}/${m}/${d} ${h}:${min} 現在`;
+    }
+    
+    // URL用フォーマット YYYYMMDDHHMMSS
+    function formatDateToUrl(date) {
+       return date.getFullYear().toString() +
+              String(date.getMonth() + 1).padStart(2, '0') +
+              String(date.getDate()).padStart(2, '0') +
+              String(date.getHours()).padStart(2, '0') +
+              String(date.getMinutes()).padStart(2, '0') +
+              String(date.getSeconds()).padStart(2, '0');
+    }
 
-    // 表示中の（画面内の）マーカーのアイコン更新
+    const zoomThreshold = 8;
+    const amedasMarkers = [];
+    let isDiffMode = false; // 現在の表示モード
+
+    // アイコン更新処理
     function updateAmedasIcons() {
       const currentZoom = map.getZoom();
       amedasLayerGroup.eachLayer(function(marker) {
-        const temp = marker.amedasData.temp;
+        const val = isDiffMode ? marker.amedasData.diffVal : marker.amedasData.temp;
+        // データがない場合はスキップ（updateVisibleMarkersでフィルタ済みだが念のため）
+        if (val === null || val === undefined) return;
+
         if (currentZoom >= zoomThreshold) {
-          marker.setIcon(getNumberIcon(temp));
+          marker.setIcon(getNumberIcon(val, isDiffMode));
         } else {
-          marker.setIcon(getCircleIcon(temp));
+          marker.setIcon(getCircleIcon(val, isDiffMode));
         }
       });
     }
 
-    // 現在の地図表示領域にあるマーカーのみをレイヤーグループに追加する
     function updateVisibleMarkers() {
       const bounds = map.getBounds();
       amedasMarkers.forEach(function(marker) {
+        // 表示モードに応じたデータがあるか確認
+        const val = isDiffMode ? marker.amedasData.diffVal : marker.amedasData.temp;
+        
+        if (val === null || val === undefined) {
+           if (amedasLayerGroup.hasLayer(marker)) amedasLayerGroup.removeLayer(marker);
+           return;
+        }
+
         if (bounds.contains(marker.getLatLng())) {
           if (!amedasLayerGroup.hasLayer(marker)) {
             amedasLayerGroup.addLayer(marker);
@@ -157,28 +303,163 @@
           }
         }
       });
+      // 追加後にアイコンの見た目を確定させる
+      updateAmedasIcons();
     }
 
-    // 全国最新気象データ（マップ用）の取得
+    // 全国最新気象データ取得
     async function getLatestMapData() {
       const resTime = await fetch("https://www.jma.go.jp/bosai/amedas/data/latest_time.txt");
       const latestTimeText = (await resTime.text()).trim();
       const latestTime = new Date(latestTimeText);
-      const formatted = 
-            latestTime.getFullYear().toString() +
-            String(latestTime.getMonth() + 1).padStart(2, '0') +
-            String(latestTime.getDate()).padStart(2, '0') +
-            String(latestTime.getHours()).padStart(2, '0') +
-            String(latestTime.getMinutes()).padStart(2, '0') +
-            String(latestTime.getSeconds()).padStart(2, '0');
+      const formatted = formatDateToUrl(latestTime);
       const url = "https://www.jma.go.jp/bosai/amedas/data/map/" + formatted + ".json";
+      
       const response = await fetch(url);
       const mapData = await response.json();
-      return mapData;
+      
+      return { data: mapData, time: latestTime };
     }
 
     /********************
-     * マップのクリックイベント（ポップアップのクローズ処理）
+     * UI操作系機能
+     ********************/
+    
+    // 通常データの更新（「データ更新」ボタン）
+    async function refreshData() {
+      const btn = document.getElementById('refresh-btn');
+      const timeDisplay = document.getElementById('time-display');
+      
+      btn.disabled = true;
+      btn.innerText = "更新中...";
+      
+      try {
+        // 差分モードを解除して通常モードへ
+        isDiffMode = false;
+        document.getElementById('diff-legend').style.display = 'none';
+
+        const result = await getLatestMapData();
+        const latestMapData = result.data;
+        const latestTime = result.time;
+
+        timeDisplay.innerText = formatTime(latestTime);
+
+        // マーカーデータ更新
+        amedasMarkers.forEach(marker => {
+          const stnid = marker.amedasData.stnid;
+          const obs = latestMapData[stnid];
+          if (obs && obs.temp && obs.temp[1] === 0) {
+            marker.amedasData.temp = obs.temp[0];
+          } else {
+            marker.amedasData.temp = null;
+          }
+        });
+
+        // 差分用プルダウンも最新時刻に合わせて再生成
+        await initTimeDropdowns(latestTime);
+
+        updateVisibleMarkers();
+        console.log("通常データを更新しました");
+      } catch (err) {
+        console.error("更新エラー:", err);
+        alert("データの更新に失敗しました。");
+      } finally {
+        btn.disabled = false;
+        btn.innerText = "データ更新";
+      }
+    }
+
+    // 差分計算パネルの開閉
+    function toggleDiffPanel() {
+      const options = document.getElementById('diff-options');
+      const toggle = document.getElementById('diff-toggle');
+      if (options.classList.contains('active')) {
+        options.classList.remove('active');
+        toggle.innerText = "▼ 気温差を計算";
+      } else {
+        options.classList.add('active');
+        toggle.innerText = "▲ 設定を閉じる";
+        // 開いたタイミングでプルダウンが空なら初期化（基本はロード時に完了済み）
+      }
+    }
+
+    // 時刻プルダウンの初期化
+    async function initTimeDropdowns(baseDate) {
+      const selectA = document.getElementById('time-select-a');
+      const selectB = document.getElementById('time-select-b');
+      selectA.innerHTML = "";
+      selectB.innerHTML = "";
+
+      // 過去24時間分（10分刻み = 145コマ）
+      for (let i = 0; i < 145; i++) {
+        const d = new Date(baseDate.getTime() - i * 10 * 60 * 1000);
+        const val = formatDateToUrl(d);
+        const label = `${String(d.getDate())}日 ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+        
+        const optA = document.createElement("option");
+        optA.value = val; optA.text = label;
+        selectA.appendChild(optA);
+
+        const optB = document.createElement("option");
+        optB.value = val; optB.text = label;
+        selectB.appendChild(optB);
+      }
+      // デフォルト: A=現在, B=1時間前
+      if (selectB.options.length > 6) selectB.selectedIndex = 6;
+    }
+
+    // 差分計算実行
+    async function calculateDifference() {
+      const btn = document.getElementById('calc-btn');
+      const valA = document.getElementById('time-select-a').value;
+      const valB = document.getElementById('time-select-b').value;
+      
+      btn.disabled = true;
+      btn.innerText = "計算中...";
+
+      try {
+        const urlA = "https://www.jma.go.jp/bosai/amedas/data/map/" + valA + ".json";
+        const urlB = "https://www.jma.go.jp/bosai/amedas/data/map/" + valB + ".json";
+
+        const [resA, resB] = await Promise.all([
+          fetch(urlA).then(r => r.ok ? r.json() : null),
+          fetch(urlB).then(r => r.ok ? r.json() : null)
+        ]);
+
+        if (!resA || !resB) throw new Error("データ取得失敗");
+
+        // 差分計算
+        amedasMarkers.forEach(marker => {
+          const stnid = marker.amedasData.stnid;
+          const obsA = resA[stnid];
+          const obsB = resB[stnid];
+          
+          let valA = (obsA && obsA.temp && obsA.temp[1] === 0) ? obsA.temp[0] : null;
+          let valB = (obsB && obsB.temp && obsB.temp[1] === 0) ? obsB.temp[0] : null;
+
+          if (valA !== null && valB !== null) {
+            marker.amedasData.diffVal = valA - valB;
+          } else {
+            marker.amedasData.diffVal = null;
+          }
+        });
+
+        // モード変更と表示更新
+        isDiffMode = true;
+        document.getElementById('time-display').innerText = "気温差分表示中";
+        document.getElementById('diff-legend').style.display = 'block';
+        updateVisibleMarkers();
+
+      } catch (e) {
+        alert("データが見つかりませんでした。");
+      } finally {
+        btn.disabled = false;
+        btn.innerText = "差分を表示 (A-B)";
+      }
+    }
+
+    /********************
+     * ポップアップ制御
      ********************/
     let currentPopup = null;
     map.on('click', function(e) {
@@ -189,61 +470,54 @@
     });
 
     /********************
-     * 各観測所データの取得とマーカー作成
+     * 初期化処理
      ********************/
     Promise.all([
       fetch("https://www.jma.go.jp/bosai/amedas/const/amedastable.json").then(r => r.json()),
       getLatestMapData()
-    ]).then(([amedasData, latestMapData]) => {
+    ]).then(([amedasData, mapDataResult]) => {
+      
+      const latestMapData = mapDataResult.data;
+      const latestTime = mapDataResult.time;
+
+      document.getElementById('time-display').innerText = formatTime(latestTime);
+      initTimeDropdowns(latestTime); // プルダウン初期化
+
       for (const stnid in amedasData) {
         const station = amedasData[stnid];
         if (!station) continue;
         if (!station.elems || station.elems.charAt(0) === '0') continue;
-        if (!station.lat || !station.lon ||
-            !Array.isArray(station.lat) || station.lat.length < 2 ||
-            !Array.isArray(station.lon) || station.lon.length < 2) {
-          console.warn(`Station ${stnid} has invalid lat/lon data. Skipping.`);
-          continue;
-        }
+        if (!station.lat || !station.lon) continue;
+
         const lat = station.lat[0] + station.lat[1] / 60;
         const lon = station.lon[0] + station.lon[1] / 60;
 
         const mapObs = latestMapData[stnid];
-        if (!mapObs || !mapObs.temp) continue;
-        const tempValue = mapObs.temp[0];
-        const quality = mapObs.temp[1];
-        if (quality !== 0) continue;
+        let tempValue = null;
+        if (mapObs && mapObs.temp && mapObs.temp[1] === 0) {
+          tempValue = mapObs.temp[0];
+        }
+
+        // 初期表示は「通常モード」なので null データがあってもマーカー作成自体はしておく（後でupdateVisibleMarkersでフィルタ）
+        // ただし icon作成時に null だとエラーになるので 0 を仮置きするか、データあるものだけ作る
+        if (tempValue === null) continue; // 今回はデータあるものだけ作成
 
         const currentZoom = map.getZoom();
         const icon = (currentZoom >= zoomThreshold) ? getNumberIcon(tempValue) : getCircleIcon(tempValue);
         const marker = L.marker([lat, lon], { icon: icon });
-        marker.amedasData = { stnid: stnid, station: station, temp: tempValue };
         
-        // マーカークリック時：詳細グラフのポップアップを表示する処理
+        marker.amedasData = { stnid: stnid, station: station, temp: tempValue, diffVal: null };
+        
+        // クリックイベント（グラフ）
         marker.on('click', async function(e) {
           e.originalEvent.stopPropagation();
-
-          // 既存のポップアップのバインディングを解除して新規生成
           marker.unbindPopup();
-
-          // 他のマーカーのポップアップが開いていれば閉じる
-          if (currentPopup && currentPopup !== marker.getPopup()) {
-            currentPopup.remove();
-          }
+          if (currentPopup) currentPopup.remove();
           
-          // 新たにポップアップをバインドして開く
-          marker.bindPopup("気温データを取得中...", {
-            offset: L.point(0, -15),
-            maxWidth: 500,
-            minWidth: 200
-          });
+          marker.bindPopup("データを取得中...", { offset: L.point(0, -15), maxWidth: 500, minWidth: 200 });
           marker.openPopup();
           currentPopup = marker.getPopup();
-          
-          // ポップアップが閉じられた際に currentPopup をリセット
-          currentPopup.on('remove', function() {
-            currentPopup = null;
-          });
+          currentPopup.on('remove', () => { currentPopup = null; });
 
           try {
             const result = await getTemperatureData(stnid);
@@ -263,132 +537,71 @@
                   backgroundColor: 'rgba(0, 0, 255, 0.1)',
                   borderWidth: 1,
                   pointRadius: 1,
-                  pointBackgroundColor: 'blue',
                   fill: true,
                   tension: 0
                 }]
               },
               options: {
                 plugins: {
-                  title: {
-                    display: true,
-                    text: stnid + " " + station.kjName + " " + station.knName + " (標高: " + station.alt + "m)"
-                  },
-                  tooltip: {
-                    mode: 'index',
-                    intersect: false
-                  }
+                  title: { display: true, text: station.kjName + " (標高: " + station.alt + "m)" },
+                  tooltip: { mode: 'index', intersect: false }
                 },
-                hover: {
-                  mode: 'index',
-                  intersect: false
-                },
+                hover: { mode: 'index', intersect: false },
                 scales: {
-                  x: {
-                    ticks: {
-                      autoSkip: false,
-                      callback: function(value, index, ticks) {
-                        let label = result.labels[index];
-                        return label.endsWith(':00') ? label : '';
-                      }
-                    },
-                    title: {
-                      display: true,
-                      text: '時刻'
-                    }
-                  },
-                  y: {
-                    title: {
-                      display: true,
-                      text: '気温 (°C)'
-                    }
-                  }
+                  x: { ticks: { autoSkip: false, callback: (v, i) => result.labels[i].endsWith(':00') ? result.labels[i] : '' } },
+                  y: { title: { display: true, text: '気温 (°C)' } }
                 }
               }
             });
           } catch (error) {
-            console.error("温度データ取得エラー:", error);
             marker.getPopup().setContent("データの取得に失敗しました。");
           }
         });
 
         amedasMarkers.push(marker);
       }
-      // 初回描画時、表示領域内のマーカーのみ追加
       updateVisibleMarkers();
     }).catch(err => {
       console.error("データ取得に失敗:", err);
+      document.getElementById('time-display').innerText = "取得失敗";
     });
 
-    /********************
-     * 個別地点の時系列データ取得
-     ********************/
+    // グラフ用データ取得
     async function getTemperatureData(stnid) {
       const resTime = await fetch("https://www.jma.go.jp/bosai/amedas/data/latest_time.txt");
-      const latestTimeText = (await resTime.text()).trim();
-      const latestTime = new Date(latestTimeText);
-
-      const currentHour = latestTime.getHours();
-      const blockHour = Math.floor(currentHour / 3) * 3;
+      const latestTime = new Date((await resTime.text()).trim());
       const baseBlockTime = new Date(latestTime);
-      baseBlockTime.setHours(blockHour, 0, 0, 0);
+      baseBlockTime.setHours(Math.floor(latestTime.getHours() / 3) * 3, 0, 0, 0);
 
       let fetchPromises = [];
       for (let i = 0; i < 8; i++) {
         let blockTime = new Date(baseBlockTime);
         blockTime.setHours(baseBlockTime.getHours() - 3 * i);
-        const year = blockTime.getFullYear();
-        const month = String(blockTime.getMonth() + 1).padStart(2, '0');
-        const day = String(blockTime.getDate()).padStart(2, '0');
-        const hour = String(blockTime.getHours()).padStart(2, '0');
-        const yyyymmdd = `${year}${month}${day}`;
-        const url = `https://www.jma.go.jp/bosai/amedas/data/point/${stnid}/${yyyymmdd}_${hour}.json`;
-        
-        fetchPromises.push(
-          fetch(url)
-            .then(response => response.json())
-            .catch(err => {
-              console.error("データ取得失敗:", url, err);
-              return null;
-            })
-        );
+        const y = blockTime.getFullYear();
+        const m = String(blockTime.getMonth() + 1).padStart(2, '0');
+        const d = String(blockTime.getDate()).padStart(2, '0');
+        const h = String(blockTime.getHours()).padStart(2, '0');
+        const url = `https://www.jma.go.jp/bosai/amedas/data/point/${stnid}/${y}${m}${d}_${h}.json`;
+        fetchPromises.push(fetch(url).then(r => r.json()).catch(() => null));
       }
 
       const blocksData = await Promise.all(fetchPromises);
       let combinedData = {};
-      blocksData.forEach(block => {
-        if (block) {
-          for (const timeKey in block) {
-            combinedData[timeKey] = block[timeKey];
-          }
-        }
-      });
-
+      blocksData.forEach(block => { if (block) Object.assign(combinedData, block); });
       const sortedKeys = Object.keys(combinedData).sort();
-      let labels = [];
-      let temperatures = [];
+      let labels = [], temperatures = [];
       sortedKeys.forEach(key => {
         const obs = combinedData[key];
-        if (obs && obs.temp && Array.isArray(obs.temp) && obs.temp.length > 0) {
-          const hour = key.substring(8, 10);
-          const minute = key.substring(10, 12);
-          labels.push(`${hour}:${minute}`);
+        if (obs && obs.temp) {
+          labels.push(`${key.substring(8,10)}:${key.substring(10,12)}`);
           temperatures.push(obs.temp[0]);
         }
       });
       return { labels, temperatures };
     }
 
-    /********************
-     * マップ操作時の更新処理（ドラッグ／ズーム後に実行）
-     ********************/
-    map.on('moveend', debounce(() => {
-      updateVisibleMarkers();
-      updateAmedasIcons();
-    }, 200));
-    map.on('zoomend', debounce(() => {
-      updateAmedasIcons();
-    }, 200));
+    map.on('moveend', debounce(() => { updateVisibleMarkers(); }, 200));
+    map.on('zoomend', debounce(() => { updateAmedasIcons(); }, 200));
   </script>
 </body>
 </html>
